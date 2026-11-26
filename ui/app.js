@@ -700,6 +700,7 @@ H.bar = (m) => {
   for (const b of m.items) put(folders.has(b.parent) ? b.parent : 0, { k: 'b', url: b.url, title: b.title, pos: b.pos, parent: b.parent });
   for (const l of kids.values()) l.sort((a, b) => a.pos - b.pos);
   S.bm = { kids, folders };
+  if (settingsOpen() && S.setSec === 'bookmarks') renderSettings();
   renderBar();
   refreshBmMenus();
 };
@@ -1177,7 +1178,6 @@ const SECTIONS = [
     ['Layout', [
       { k: 'radius', label: 'Roundness', type: 'range', min: 0, max: 24, unit: 'px' },
       { k: 'compact', label: 'Compact layout', desc: 'Tabs and address bar share one row', type: 'toggle' },
-      { k: 'bookmarks_bar', label: 'Bookmarks bar', desc: 'Ctrl+Shift+B shows or hides it', type: 'select', opts: [['always', 'Always'], ['start', 'On the start page'], ['never', 'Hidden']] },
       { k: 'rounded_pages', label: 'Rounded page corners', type: 'toggle' },
       { k: 'reduce_motion', label: 'Reduce motion', desc: 'Turn off animations', type: 'toggle' },
     ]],
@@ -1186,6 +1186,15 @@ const SECTIONS = [
     ['Favourites', [{ type: 'shortcuts' }]],
     ['Removed sites', [{ type: 'hidden' }]],
     ['Show', [{ k: 'show_clock', label: 'Clock and date', type: 'toggle' }]],
+  ] },
+  { id: 'bookmarks', icon: 'star', title: 'Bookmarks', groups: [
+    ['Bookmarks bar', [
+      { k: 'bookmarks_bar', label: 'Show the bookmarks bar', desc: 'Ctrl+Shift+B shows or hides it', type: 'seg', opts: [['always', 'Always'], ['start', 'Start page only'], ['never', 'Hidden']], kw: 'toolbar favorites folders' },
+    ]],
+    ['Your bookmarks', [
+      { type: 'bmStats', label: 'Your bookmarks', kw: 'manage folders count' },
+      { type: 'links', label: 'Show all bookmarks', kw: 'panel list manage', items: [['panel:bookmarks', 'star', 'Show all bookmarks'], ['sec:data', 'download', 'Import bookmarks']] },
+    ]],
   ] },
   { id: 'browsing', icon: 'globe', title: 'Browsing', groups: [
     ['Search', [{ k: 'search', label: 'Search engine', desc: 'Used when you type words in the address bar', type: 'select', opts: Object.entries(ENGINES) }]],
@@ -1237,11 +1246,14 @@ function openSettings(sec) {
 }
 function closeSettings() { if (settingsOpen()) closeOverlay(false); }
 function renderSetNav() {
+  const searching = !!$('#set-q').value.trim();
   $('#set-tabs').innerHTML = SECTIONS.map((s) =>
-    `<button data-sec="${s.id}" class="${s.id === S.setSec ? 'on' : ''}">${icon(s.icon)}${esc(s.title)}</button>`).join('');
+    `<button data-sec="${s.id}" class="${s.id === S.setSec && !searching ? 'on' : ''}">${icon(s.icon)}${esc(s.title)}</button>`).join('');
 }
 $('#set-tabs').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-sec]'); if (!b || b.dataset.sec === S.setSec) return;
+  const b = e.target.closest('[data-sec]'); if (!b) return;
+  if ($('#set-q').value) { $('#set-q').value = ''; document.body.classList.remove('set-searching'); }
+  else if (b.dataset.sec === S.setSec) return;
   openSettings(b.dataset.sec);
 });
 $('#set-close').innerHTML = icon('x');
@@ -1255,16 +1267,104 @@ function backdropHint() {
 const val = (f) => (typeof f === 'function' ? f() : f) || '';
 function groupsHtml(groups, s) {
   let html = '';
-  for (const [title, items] of groups) {
+  groups.forEach(([title, items], gi) => {
     const inner = items.map((it) => field(it, s)).join('');
-    if (!inner) continue;
-    html += `<div class="grp">${title ? `<h4>${esc(title)}</h4>` : ''}<div class="card">${inner}</div></div>`;
+    if (!inner) return;
+    html += `<div class="grp" data-g="${gi}">${title ? `<h4>${esc(title)}</h4>` : ''}<div class="card">${inner}</div></div>`;
+  });
+  return html;
+}
+
+// ---- settings search ---------------------------------------------------------------
+// Every setting is indexed by its name, description, section, group, options and a few
+// extra keywords. Picking a result opens its section and highlights it.
+function settingsIndex() {
+  const out = [];
+  for (const sec of SECTIONS) {
+    sec.groups.forEach(([gt, items], gi) => {
+      items.forEach((it) => {
+        const label = it.label || (it.type === 'buttons' ? it.items.map((x) => x[2]).join(', ') : gt);
+        if (!label) return;
+        const opts = (it.opts || []).map((o) => o[1]).join(' ');
+        const btns = (it.items || []).map((x) => x[2]).join(' ');
+        const text = [label, val(it.desc), gt, sec.title, opts, btns, it.kw || '', it.k || ''].join(' ').toLowerCase();
+        out.push({ sec, gi, k: it.k, label, desc: val(it.desc), group: gt, text });
+      });
+    });
+  }
+  return out;
+}
+const SEARCH_KW = { appearance: 'look theme dark light colors', privacy: 'security ads blocker adblock', data: 'import export chrome google passwords', performance: 'speed ram sleep', mods: 'css themes customize', about: 'version help shortcuts keys' };
+function searchSettings(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const seen = new Set();
+  return settingsIndex()
+    .map((r) => ({ ...r, text: r.text + ' ' + (SEARCH_KW[r.sec.id] || '') }))
+    .filter((r) => words.every((w) => r.text.includes(w)))
+    .map((r) => ({ ...r, score: words.reduce((n, w) => n + (r.label.toLowerCase().includes(w) ? 2 : 0), 0) }))
+    .sort((a, b) => b.score - a.score)
+    .filter((r) => { const key = r.sec.id + r.gi + r.label; if (seen.has(key)) return false; seen.add(key); return true; })
+    .slice(0, 30);
+}
+function mark(text, q) {
+  let html = esc(text);
+  for (const w of q.toLowerCase().split(/\s+/).filter((x) => x.length > 1)) {
+    html = html.replace(new RegExp(`(${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'), '<mark>$1</mark>');
   }
   return html;
 }
+function renderSearch() {
+  const q = $('#set-q').value.trim();
+  document.body.classList.toggle('set-searching', !!q);
+  renderSetNav();
+  if (!q) { renderSettings(true); return; }
+  S.setHits = searchSettings(q); S.setPick = 0;
+  $('#set-h').textContent = 'Search';
+  $('#set-body').innerHTML = S.setHits.length
+    ? `<div class="hits">` + S.setHits.map((r, i) =>
+      `<button class="hit${i === 0 ? ' on' : ''}" data-i="${i}">${icon(r.sec.icon)}<div class="txt"><b>${mark(r.label, q)}</b>` +
+      `<small>${esc(r.sec.title)}${r.group && r.group !== r.label ? ' › ' + esc(r.group) : ''}${r.desc ? ' · ' + mark(r.desc, q) : ''}</small></div>${icon('fwd')}</button>`).join('') + '</div>'
+    : `<div class="empty">No settings match “${esc(q)}”.</div>`;
+  $('#set-body').scrollTop = 0;
+}
+function goToSetting(r) {
+  $('#set-q').value = '';
+  document.body.classList.remove('set-searching');
+  openSettings(r.sec.id);
+  requestAnimationFrame(() => {
+    const body = $('#set-body');
+    const el = (r.k && body.querySelector(`[data-k="${r.k}"]`)?.closest('.set')) || body.querySelector(`.grp[data-g="${r.gi}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: document.documentElement.hasAttribute('data-calm') ? 'auto' : 'smooth' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  });
+}
+$('#set-search .ic').innerHTML = icon('search');
+$('#set-q').addEventListener('input', renderSearch);
+$('#set-q').addEventListener('keydown', (e) => {
+  const hits = S.setHits || [];
+  if (e.key === 'Escape' && $('#set-q').value) { e.preventDefault(); e.stopPropagation(); $('#set-q').value = ''; renderSearch(); return; }
+  if (!$('#set-q').value.trim() || !hits.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    S.setPick = (S.setPick + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length;
+    document.querySelectorAll('#set-body .hit').forEach((b, i) => b.classList.toggle('on', i === S.setPick));
+    document.querySelector('#set-body .hit.on')?.scrollIntoView({ block: 'nearest' });
+  }
+  if (e.key === 'Enter') { e.preventDefault(); goToSetting(hits[S.setPick] || hits[0]); }
+});
+$('#set-body').addEventListener('click', (e) => {
+  const h = e.target.closest('.hit[data-i]'); if (h) { goToSetting(S.setHits[+h.dataset.i]); return; }
+  const g = e.target.closest('[data-go]'); if (!g) return;
+  const [kind, where] = g.dataset.go.split(':');
+  if (kind === 'sec') openSettings(where);
+  else { closeSettings(); if (S.panel !== where) togglePanel(where); }
+});
 // Re-render whichever settings views are open (the window and/or the Trackers panel).
 function renderSettings(top) {
   const s = S.settings; if (!s) return;
+  if (settingsOpen() && $('#set-q').value.trim()) { if (S.panel === 'trackers') renderTrackers(); return; }
   if (settingsOpen()) {
     const sec = SECTIONS.find((x) => x.id === S.setSec) || SECTIONS[0];
     $('#set-h').textContent = sec.title;
@@ -1327,6 +1427,14 @@ function field(it, s) {
     case 'select':
       return `<div class="set">${label}<select class="field" style="width:auto;min-width:150px" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
         it.opts.map(([v, l]) => `<option value="${v}" ${String(s[it.k]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('') + '</select></div>';
+    case 'bmStats': {
+      const marks = S.bm ? [...S.bm.kids.values()].flat().filter((x) => x.k === 'b').length : 0;
+      const folders = S.bm ? S.bm.folders.size : 0;
+      return `<div class="set">${`<div class="lbl"><b>${marks} bookmark${marks === 1 ? '' : 's'} in ${folders} folder${folders === 1 ? '' : 's'}</b>` +
+        '<small>Drag them on the bar to reorder, right-click for more</small></div>'}</div>`;
+    }
+    case 'links':
+      return `<div class="btns">` + it.items.map(([go, ic, l]) => `<button class="btn" data-go="${go}">${icon(ic)}${esc(l)}</button>`).join('') + '</div>';
     case 'histKeep': {
       const d = s.history_days | 0; const custom = S.histCustom || !KEEP.some(([v]) => v === d);
       return `<div class="set">${label}<div class="hk"><select class="field" data-hk style="width:auto;min-width:130px">` +
@@ -1504,6 +1612,7 @@ addEventListener('keydown', (e) => {
   if (c === 'escape' && S.bmMenus.length && !document.body.classList.contains('ctx-open')) { closeBmMenus(); return; }
   if (c === 'ctrl+comma') { e.preventDefault(); settingsOpen() ? closeSettings() : openSettings(); return; }
   if (c === 'escape' && document.body.classList.contains('ctx-open')) { hideMenu(); return; }
+  if (c === 'ctrl+f' && settingsOpen()) { e.preventDefault(); $('#set-q').focus(); $('#set-q').select(); return; }
   if (c === 'escape' && settingsOpen() && !document.body.classList.contains('dlg-open')) { closeSettings(); return; }
   if (settingsOpen() || document.body.classList.contains('dlg-open')) return;
   if (c === 'f5' || c === 'ctrl+r') { e.preventDefault(); send({ t: 'nav', a: 'reload' }); return; }

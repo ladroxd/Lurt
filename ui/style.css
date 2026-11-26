@@ -544,6 +544,26 @@ body.dlg-open #scrim { z-index: 32; }
 body.settings-open #settings { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%); }
 #set-nav { width: 214px; flex: none; padding: 18px 10px; border-right: 1px solid var(--hair); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .set-title { font-size: 15px; font-weight: 600; padding: 2px 10px 14px; }
+#set-search { position: relative; display: block; margin: 0 2px 10px; }
+#set-search .ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); display: flex; color: var(--fg3); pointer-events: none; }
+#set-search .ic .i { width: 15px; height: 15px; }
+#set-search input { width: 100%; height: 32px; padding: 0 10px 0 32px; border-radius: calc(var(--r) * .65); font-size: 12.5px;
+  background: var(--hover); border: 1px solid var(--edge); color: rgb(var(--fg)); outline: none; }
+#set-search input:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.hits { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; }
+.hit { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: calc(var(--r) * .7); text-align: left; color: var(--fg2); }
+.hit > .i { width: 17px; height: 17px; flex: none; color: var(--fg3); }
+.hit > .i:last-child { width: 14px; height: 14px; opacity: 0; transition: opacity .12s; }
+.hit .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hit b { font-weight: 600; font-size: 13px; color: rgb(var(--fg)); }
+.hit small { font-size: 11.5px; color: var(--fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hit mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.hit:hover, .hit.on { background: var(--hover); }
+.hit.on > .i:first-child, .hit:hover > .i:first-child { color: var(--accent); }
+.hit.on > .i:last-child, .hit:hover > .i:last-child { opacity: 1; }
+#set-body .empty { padding: 40px 0; text-align: center; color: var(--fg3); font-size: 13px; }
+.flash { animation: flash 1.6s var(--ease); border-radius: calc(var(--r) * .7); }
+@keyframes flash { 0%, 35% { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); } }
 #set-tabs button {
   display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px;
   border-radius: calc(var(--r) * .65); color: var(--fg2); font-size: 13px; text-align: left;
