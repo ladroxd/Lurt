@@ -87,6 +87,7 @@ const looksLikeUrl = (q) => /^[a-z]+:\/\//i.test(q) || /^(localhost|\d{1,3}(\.\d
 const H = {
   state(m) {
     Object.assign(S, m);
+    brandFromTabs();
     renderTabs(); renderBar(); renderStart();
     // First real frame is on screen: let the native startup skeleton fade out.
     if (!S.painted) { S.painted = true; requestAnimationFrame(() => requestAnimationFrame(() => send({ t: 'painted' }))); }
@@ -313,12 +314,102 @@ function renderWake(t) {
     bg.style.backgroundImage = pic ? `url("${pic}")` : '';
     bg.classList.toggle('none', !pic);
   }
-  if (w._id !== t.id) {
-    w._id = t.id;
-    const host = hostOf(t.url);
+  const host = hostOf(t.url);
+  // Per tab and site: a tab can go on to another site while it loads.
+  if (w._id !== t.id + host) {
+    w._id = t.id + host;
     w.querySelector('.orb-ic').innerHTML = `<img src="${esc(t.fav || `https://${host}/favicon.ico`)}" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(t.url, t.title)))}">`;
-    w.querySelector('.wake-t').textContent = `Waking up ${host || pretty(t.url)}`;
+    w.querySelector('.wake-t').textContent = siteName(t.url);
+    wakeBrand(t);
   }
+}
+
+// The site's name for the loading screen: "youtube.com" -> "Youtube", "m.twitch.tv" -> "Twitch",
+// "bbc.co.uk" -> "Bbc".
+function siteName(u) {
+  const h = hostOf(u);
+  if (!h) return pretty(u);
+  const parts = h.split('.');
+  if (parts.length < 2 || /^\d+$/.test(parts[parts.length - 1])) return h;
+  let i = parts.length - 2;
+  if (parts.length >= 3 && parts[parts.length - 1].length === 2 && /^(co|com|org|net|gov|ac|edu)$/.test(parts[i])) i--;
+  const n = parts[i];
+  return n[0].toUpperCase() + n.slice(1);
+}
+
+// Loading screen tint: the color of the site's logo, faded and breathing. Well-known sites
+// get their brand color at once; for the rest Rust downloads the favicon (pages can't read
+// pixels of images from other sites) and its strongest color is picked here.
+const BRANDS = {
+  youtube: '#ff0033', youtu: '#ff0033', twitch: '#9146ff', netflix: '#e50914', spotify: '#1db954', facebook: '#1877f2',
+  instagram: '#e1306c', reddit: '#ff4500', discord: '#5865f2', linkedin: '#0a66c2', tiktok: '#fe2c55', whatsapp: '#25d366',
+  amazon: '#ff9900', google: '#4285f4', chatgpt: '#10a37f', openai: '#10a37f', claude: '#d97757', anthropic: '#d97757',
+  pinterest: '#e60023', telegram: '#26a5e4', kick: '#53fc18', soundcloud: '#ff5500', twitter: '#1d9bf0', paypal: '#0070e0',
+};
+S.brand = new Map();
+function wakeBrand(t) {
+  const host = hostOf(t.url);
+  let c = BRANDS[siteName(t.url).toLowerCase()];
+  if (c === undefined && host) {
+    if (!S.brand.has(host)) { S.brand.set(host, null); send({ t: 'favColor', host, url: t.fav || '' }); }
+    c = S.brand.get(host);
+  }
+  applyBrand(c);
+}
+// Sites whose /favicon.ico can't be fetched (blocked, or declared only in the page): use the
+// icon the page declares once the tab knows it, so the color is ready next time.
+S.brandTried = new Set();
+function brandFromTabs() {
+  for (const t of S.tabs || []) {
+    const host = hostOf(t.url);
+    if (!host || !t.fav || !/^https?:/.test(t.fav) || S.brandTried.has(host)) continue;
+    if (BRANDS[siteName(t.url).toLowerCase()] || S.brand.get(host)) continue;
+    if (S.brand.get(host) === null) continue; // a lookup is still running
+    S.brandTried.add(host); S.brand.set(host, null);
+    send({ t: 'favColor', host, url: t.fav });
+  }
+}
+function applyBrand(c) {
+  const w = $('#wake');
+  if (c) w.style.setProperty('--brand', c);
+  w.classList.toggle('branded', !!c);
+}
+H.favData = (m) => iconColor(m.data, (c) => {
+  S.brand.set(m.host, c || '');
+  const t = cur();
+  if (t && !t.shown && hostOf(t.url) === m.host) applyBrand(c);
+});
+function iconColor(src, done) {
+  if (!src) { done(null); return; }
+  const img = new Image();
+  img.onerror = () => done(null);
+  img.onload = () => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 32;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, 32, 32);
+    let d; try { d = g.getImageData(0, 0, 32, 32).data; } catch { done(null); return; }
+    // Bucket colorful pixels by hue, weighted by saturation; skip grays, white and black.
+    const buckets = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 140) continue;
+      const r = d[i], gr = d[i + 1], b = d[i + 2];
+      const max = Math.max(r, gr, b), min = Math.min(r, gr, b);
+      const l = (max + min) / 510;
+      const s = max === min ? 0 : (max - min) / (255 - Math.abs(max + min - 255));
+      if (s < 0.25 || l < 0.12 || l > 0.92) continue;
+      let h = max === r ? (gr - b) / (max - min) : max === gr ? 2 + (b - r) / (max - min) : 4 + (r - gr) / (max - min);
+      h = ((h * 60) + 360) % 360;
+      const k = Math.round(h / 24) % 15;
+      const e = buckets.get(k) || { n: 0, r: 0, g: 0, b: 0 };
+      e.n += s; e.r += r * s; e.g += gr * s; e.b += b * s;
+      buckets.set(k, e);
+    }
+    let best = null;
+    for (const e of buckets.values()) if (!best || e.n > best.n) best = e;
+    if (!best || best.n < 6) { done(null); return; }
+    done(`rgb(${Math.round(best.r / best.n)} ${Math.round(best.g / best.n)} ${Math.round(best.b / best.n)})`);
+  };
+  img.src = src;
 }
 
 // ---- shield popover ---------------------------------------------------------
@@ -1249,7 +1340,10 @@ const SECTIONS = [
     ]],
   ] },
   { id: 'performance', icon: 'bolt', title: 'Performance', groups: [
-    ['Memory', [{ k: 'sleep_minutes', label: 'Sleep background tabs', desc: 'Frees memory; the tab reloads when you return', type: 'select', num: true, opts: [[0, 'Never'], [5, 'After 5 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour']] }]],
+    ['Memory', [
+      { k: 'sleep_minutes', label: 'Sleep background tabs', desc: 'Frees memory; the tab reloads when you return', type: 'select', num: true, opts: [[0, 'Never'], [5, 'After 5 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour']] },
+      { k: 'share_processes', label: 'Fewer processes', desc: 'Embedded frames from other sites (ads, payment and video embeds) share their page\'s process instead of one each. Uses about half the memory, with less isolation between sites. Applies after restarting Lurt.', type: 'toggle', kw: 'memory ram subframe processes site isolation' },
+    ]],
   ] },
   { id: 'mods', icon: 'code', title: 'Mods', groups: [
     ['Browser style', [{ k: 'ui_css', label: 'Custom CSS', desc: 'Applied live. Try: :root { --r: 22px }', type: 'code' }]],

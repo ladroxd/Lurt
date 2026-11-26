@@ -66,6 +66,42 @@ pub fn resolve_input(input: &str, engine: &str) -> String {
     search_url(engine, s)
 }
 
+/// Download a small image (a favicon) as a `data:` URL, or None.
+pub fn fetch_image(url: &str) -> Option<String> {
+    use base64::Engine;
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return None;
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(5))).build().into();
+    // Some sites (behind Cloudflare and the like) refuse requests that don't look like a browser.
+    let mut r = agent
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("Accept", "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5")
+        .call()
+        .ok()?;
+    let mime = r
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let mime = match mime.as_str() {
+        m if m.starts_with("image/") => mime.clone(),
+        "" | "application/octet-stream" => "image/x-icon".to_string(),
+        _ => return None,
+    };
+    let bytes = r.body_mut().with_config().limit(512 * 1024).read_to_vec().ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 pub fn host_of(u: &str) -> String {
     url::Url::parse(u)
         .ok()

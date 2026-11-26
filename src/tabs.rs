@@ -74,6 +74,20 @@ pub struct ViewOpts<'a> {
     pub theme: Theme,
 }
 
+/// WebView2 engine arguments, the same for every view (views sharing a profile must match).
+/// Starts with wry's defaults: no mini menu and SmartScreen, autoplay allowed.
+pub static ENGINE_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn engine_args(share_processes: bool) -> String {
+    let mut a = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required");
+    if share_processes {
+        // Cross-site iframes stay in their page's renderer instead of a process each
+        // ("WebView2 Subframe: stripe.network" and so on): about half the memory.
+        a.push_str(" --disable-site-isolation-trials");
+    }
+    a
+}
+
 pub fn create(
     id: u32,
     opts: ViewOpts,
@@ -106,6 +120,7 @@ pub fn create(
     };
 
     let view = WebViewBuilder::new_with_web_context(ctx)
+        .with_additional_browser_args(ENGINE_ARGS.get().cloned().unwrap_or_else(|| engine_args(true)))
         .with_url(opts.url)
         .with_bounds(opts.bounds)
         .with_visible(opts.visible)

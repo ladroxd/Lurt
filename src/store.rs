@@ -40,6 +40,9 @@ pub struct Settings {
     pub tracking: String,
     /// Unload background tabs after this many minutes. 0 = never.
     pub sleep_minutes: u32,
+    /// Let cross-site iframes (ads, payment and video embeds) share their page's process
+    /// instead of one process each. About half the memory; applies after a restart.
+    pub share_processes: bool,
     /// Extra CSS for the browser UI, edited in Settings.
     pub ui_css: String,
     /// Offer to save passwords you type into sites.
@@ -85,6 +88,7 @@ impl Default for Settings {
             adblock_allow: Vec::new(),
             tracking: "balanced".into(),
             sleep_minutes: 30,
+            share_processes: true,
             ui_css: String::new(),
             save_passwords: true,
             autofill: true,

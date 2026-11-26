@@ -63,6 +63,8 @@ pub enum Ev {
     Imported(Result<(usize, usize), String>, String),
     /// Google accounts signed in to the browser, or why they couldn't be read.
     Accounts(Result<Vec<account::Account>, String>),
+    /// A site's favicon for the loading screen color: (host, data: URL or None).
+    FavData(String, Option<String>),
     /// New tab shortcuts found while importing a browser profile: (title, url).
     ImportedShortcuts(Vec<(String, String)>),
     SignedOut,
@@ -208,7 +210,9 @@ fn main() {
     let page = UI_HTML.replace("/*CSS*/", UI_CSS).replace("/*JS*/", UI_JS);
     let p = proxy.clone();
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+    let args = tabs::ENGINE_ARGS.get_or_init(|| tabs::engine_args(settings.share_processes)).clone();
     let chrome = WebViewBuilder::new_with_web_context(&mut ctx)
+        .with_additional_browser_args(args)
         .with_html(page)
         .with_transparent(true)
         .with_bounds(Rect {
@@ -1112,6 +1116,9 @@ impl App {
                 }
                 self.account_at = Some(Instant::now() + Duration::from_millis(500));
             }
+            Ev::FavData(host, data) => {
+                self.send(json!({ "t": "favData", "host": host, "data": data }));
+            }
             Ev::ImportedShortcuts(list) => {
                 // Add them to the start page favourites, skipping sites already pinned.
                 let mut s = self.settings.clone();
@@ -1505,6 +1512,16 @@ impl App {
                 if let Some(v) = self.active_view() {
                     v.open_devtools();
                 }
+            }
+            "favColor" => {
+                let (host, url, proxy) = (s("host"), s("url"), self.proxy.clone());
+                if host.is_empty() || host.contains('/') {
+                    return;
+                }
+                std::thread::spawn(move || {
+                    let data = util::fetch_image(&url).or_else(|| util::fetch_image(&format!("https://{host}/favicon.ico")));
+                    let _ = proxy.send_event(Ev::FavData(host, data));
+                });
             }
             "importSources" => {
                 self.send(json!({ "t": "sources", "items": importer::detect() }));
