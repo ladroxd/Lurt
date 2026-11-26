@@ -89,6 +89,8 @@ struct App {
     closed: Vec<String>,
     fullscreen: bool,
     overlay: bool,
+    /// When to re-present the window so the Windows 10 blur covers its new size.
+    glass_fix_at: Option<Instant>,
     ui_ready: bool,
     started: Instant,
     quit: bool,
@@ -225,6 +227,7 @@ fn main() {
         closed: Vec::new(),
         fullscreen: false,
         overlay: false,
+        glass_fix_at: None,
         ui_ready: false,
         started: Instant::now(),
         quit: false,
@@ -246,9 +249,10 @@ fn main() {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => app.quit = true,
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                    // Windows 10's blur stays at the old size/position after a maximize
-                    // or restore unless it is applied again.
-                    app.backdrop = glass::apply(&app.window, &app.settings.backdrop, is_dark(&app.settings.theme));
+                    // Once resizing settles (maximize, restore, or the end of a drag).
+                    if app.backdrop != "none" {
+                        app.glass_fix_at = Some(Instant::now() + Duration::from_millis(140));
+                    }
                     app.layout();
                     app.push_state();
                 }
@@ -256,7 +260,14 @@ fn main() {
             },
             _ => {}
         }
-        let wake = app.tabs.iter().filter_map(|t| t.reveal_by).min().map_or(next_tick, |r| r.min(next_tick));
+        if app.glass_fix_at.is_some_and(|t| t <= Instant::now()) {
+            app.glass_fix_at = None;
+            glass::refresh(&app.window);
+        }
+        let mut wake = app.tabs.iter().filter_map(|t| t.reveal_by).min().map_or(next_tick, |r| r.min(next_tick));
+        if let Some(t) = app.glass_fix_at {
+            wake = wake.min(t);
+        }
         *cf = ControlFlow::WaitUntil(wake);
         if app.quit {
             app.save_session();

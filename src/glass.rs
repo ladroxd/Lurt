@@ -6,10 +6,29 @@ use windows::Win32::{
     Foundation::{COLORREF, HWND},
     Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn},
     UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW,
-        WS_EX_LAYERED,
+        GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, LWA_ALPHA, SWP_HIDEWINDOW, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow,
+        SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, WS_EX_LAYERED,
     },
 };
+
+/// Windows 10 keeps the blur at the size the window had when it was last shown, so
+/// after a maximize or resize part of the window loses its glass (a visible rectangle).
+/// Re-presenting the window makes the compositor pick up the new size.
+pub fn refresh(window: &Window) {
+    let hwnd = HWND(window.hwnd() as _);
+    // Hiding and showing back to back, with no frame in between, so nothing flickers.
+    // (Re-applying the blur, cloaking or a frame change don't help.)
+    unsafe {
+        let was_front = GetForegroundWindow() == hwnd;
+        let keep = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, keep | SWP_HIDEWINDOW);
+        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, keep | SWP_SHOWWINDOW);
+        if was_front {
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
 
 /// Fade the whole window, pages included. `percent` is 10..=100; 100 turns it off.
 pub fn set_window_opacity(window: &Window, percent: u8) {
