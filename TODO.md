@@ -4,13 +4,15 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 
 ## Release
 
-- [ ] Owner tests the latest build and says "push".
+- [x] Push `main` up to the Google account button (4442139).
+- [ ] Owner tests the latest build and says "push" for the newer commits (skeleton, Delete all browser data, bookmarks bar right-click fix).
 - [ ] Push `main`, then tag `v0.1.0` and push the tag. The release workflow builds `lurt.exe` and opens a **draft** release with the notes from `.github/release-notes/v0.1.0.md`.
 - [ ] Review the draft release on GitHub and publish it.
 
 ## Account
 
 - [ ] **Sync Lurt settings to the Google account.** Store settings (and later bookmarks) in the account's Google Drive app data folder, which only Lurt can see. Needs a Google Cloud project with an OAuth client ID for a desktop app (owner to create it), sign-in through the system browser with PKCE, the `drive.appdata` scope, and a "Sync now / last synced" row in Settings > Account. Until then, Settings > Account saves and loads settings as a file.
+- [ ] Delete all browser data: optionally keep chosen kinds (for example keep bookmarks, delete the rest).
 - [ ] Show the account photo even before Google's photo server is reachable (cache it in the profile).
 
 ## Extensions
@@ -31,6 +33,11 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] Find in page (Ctrl+F) styled like the rest of the UI.
 - [ ] Zoom controls (Ctrl+plus, Ctrl+minus, Ctrl+0) with a zoom indicator.
 
+## Startup
+
+- [ ] Compact layout: measure the one-row toolbar like the normal layout so its skeleton matches 1:1 too (the normal layout already does).
+- [ ] Skeleton for a restored website tab: draw that site's real outline (from a saved low-res snapshot) instead of a generic page.
+
 ## Bookmarks
 
 - [ ] Bookmark manager page: search, move many at once, sort, export to an HTML file.
@@ -43,3 +50,6 @@ These work in tests and screenshots but need a real mouse and keyboard to confir
 - [ ] Address bar: click once selects the whole URL; drag to highlight part of it.
 - [ ] Waking a sleeping tab shows the blurred picture of the page.
 - [ ] Dragging bookmarks between the bar and open folder menus on a real website (the page is swapped for a snapshot while menus are open).
+- [ ] Signed in to Google in Lurt: the account button shows your photo and name; Sign out signs you out of Gmail and YouTube too.
+- [ ] Delete all browser data while signed in: it signs you out first, then deletes everything after you type "delete".
+- [ ] Second launch after opening the start page: the skeleton lines up with your tiles, bookmarks and clock.
