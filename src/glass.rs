@@ -35,6 +35,30 @@ pub fn set_icon(window: &Window) {
     }
 }
 
+/// The work area (screen minus taskbar) of the monitor the window is on, in physical
+/// pixels: (x, y, width, height).
+pub fn work_area(window: &Window) -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+    unsafe {
+        let mon = MonitorFromWindow(HWND(window.hwnd() as _), MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(mon, &mut info).as_bool() {
+            return None;
+        }
+        let r = info.rcWork;
+        Some((r.left, r.top, r.right - r.left, r.bottom - r.top))
+    }
+}
+
+/// Where the mouse is on screen, in physical pixels.
+pub fn cursor() -> (i32, i32) {
+    let mut p = windows::Win32::Foundation::POINT::default();
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p);
+    }
+    (p.x, p.y)
+}
+
 /// Windows 10 keeps the blur at the size the window had when it was last shown, so
 /// after a maximize or resize part of the window loses its glass (a visible rectangle).
 /// Re-presenting the window makes the compositor pick up the new size.

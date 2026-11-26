@@ -92,6 +92,10 @@ struct App {
     overlay: bool,
     /// When to re-present the window so the Windows 10 blur covers its new size.
     glass_fix_at: Option<Instant>,
+    /// "Maximized": Lurt fills the work area as a normal window, because Windows 10 paints
+    /// the blur of a truly maximized window with a light gray fill (the browser looked
+    /// brighter maximized). Holds the position and size to restore.
+    zoom: Option<(tao::dpi::PhysicalPosition<i32>, tao::dpi::PhysicalSize<u32>)>,
     /// When old history was last auto-deleted (checked hourly).
     pruned_at: Option<Instant>,
     ui_ready: bool,
@@ -234,6 +238,7 @@ fn main() {
         fullscreen: false,
         overlay: false,
         glass_fix_at: None,
+        zoom: None,
         pruned_at: None,
         ui_ready: false,
         started: Instant::now(),
@@ -256,6 +261,15 @@ fn main() {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => app.quit = true,
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    // Win+Up, double-clicking or dragging to the top edge maximize for real;
+                    // turn that into Lurt's own maximize (see `zoom`).
+                    if app.window.is_maximized() && !app.fullscreen {
+                        app.window.set_maximized(false);
+                        app.set_zoom(true);
+                    } else if app.zoom.is_some() && !app.fullscreen && !app.fills_work_area() {
+                        // Snapped or resized some other way: no longer "maximized".
+                        app.zoom = None;
+                    }
                     // Once resizing settles (maximize, restore, or the end of a drag).
                     if app.backdrop != "none" {
                         app.glass_fix_at = Some(Instant::now() + Duration::from_millis(140));
@@ -342,7 +356,7 @@ impl App {
             "back": a.is_some_and(|t| t.back), "fwd": a.is_some_and(|t| t.fwd),
             "star": !url.is_empty() && self.store.is_bookmarked(url),
             "allowed": self.shield.allowed(&util::host_of(url)),
-            "max": self.window.is_maximized(), "fs": self.fullscreen,
+            "max": self.maximized(), "fs": self.fullscreen,
         }));
     }
 
@@ -377,6 +391,34 @@ impl App {
             position: LogicalPosition::new(i.l, i.t).into(),
             size: LogicalSize::new((w - i.l - i.r).max(1.0), (h - i.t - i.b).max(1.0)).into(),
         }
+    }
+
+    fn maximized(&self) -> bool {
+        self.zoom.is_some() || self.window.is_maximized()
+    }
+
+    fn fills_work_area(&self) -> bool {
+        let Some((x, y, w, h)) = glass::work_area(&self.window) else { return false };
+        let pos = self.window.outer_position().unwrap_or_default();
+        let size = self.window.outer_size();
+        (pos.x - x).abs() <= 2 && (pos.y - y).abs() <= 2 && (size.width as i32 - w).abs() <= 2 && (size.height as i32 - h).abs() <= 2
+    }
+
+    /// Fill the monitor's work area (on) or go back to the size before (off).
+    fn set_zoom(&mut self, on: bool) {
+        if on {
+            let Some((x, y, w, h)) = glass::work_area(&self.window) else { return };
+            if self.zoom.is_none() {
+                let pos = self.window.outer_position().unwrap_or_default();
+                self.zoom = Some((pos, self.window.inner_size()));
+            }
+            self.window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+            self.window.set_inner_size(tao::dpi::PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
+        } else if let Some((pos, size)) = self.zoom.take() {
+            self.window.set_inner_size(size);
+            self.window.set_outer_position(pos);
+        }
+        self.push_state();
     }
 
     fn layout(&self) {
@@ -1119,9 +1161,27 @@ impl App {
             },
             "win" => match s("a").as_str() {
                 "min" => self.window.set_minimized(true),
-                "max" => self.window.set_maximized(!self.window.is_maximized()),
+                "max" => {
+                    if self.window.is_maximized() {
+                        self.window.set_maximized(false);
+                    } else {
+                        let on = self.zoom.is_none();
+                        self.set_zoom(on);
+                    }
+                }
                 "close" => self.quit = true,
                 "drag" => {
+                    // Dragging a maximized window restores it under the cursor first.
+                    if let Some((_, size)) = self.zoom.take() {
+                        let pos = self.window.outer_position().unwrap_or_default();
+                        let width = self.window.outer_size().width.max(1);
+                        let (cx, _) = glass::cursor();
+                        let frac = f64::from(cx - pos.x) / f64::from(width);
+                        let x = cx - (frac * f64::from(size.width)) as i32;
+                        self.window.set_inner_size(size);
+                        self.window.set_outer_position(tao::dpi::PhysicalPosition::new(x, pos.y));
+                        self.push_state();
+                    }
                     let _ = self.window.drag_window();
                 }
                 "resize" => {

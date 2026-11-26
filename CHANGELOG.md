@@ -16,6 +16,7 @@ All notable changes to Lurt are listed here, newest first.
 - The blur behind the window is tinted dark in dark mode and light in light mode, so low background opacity shows the desktop without washing the UI out to gray.
 - Background opacity and window opacity (fades the whole window, websites included) sliders. Window opacity previews live while you drag.
 - Lurt logo: two clear-glass bars crossing into an L, used as the app, window and taskbar icon and on the About page.
+- Maximizing keeps the same glass color as a normal window. Windows 10 paints the blur of a truly maximized window with a light gray fill, so Lurt maximizes by filling the screen's work area itself (button, double-click, Win+Up and dragging to the top all work, and dragging the toolbar restores it).
 - After a maximize, restore or resize, the window is re-presented once resizing settles, so the Windows 10 blur covers the whole window instead of leaving a gray rectangle at the old size.
 - Native startup skeleton that appears in about 30 ms while WebView2 starts.
 - Waking a sleeping tab shows a blurred picture of how you left it (or a soft accent glow) with a spinning glass ring around the site's icon, instead of a white flash.

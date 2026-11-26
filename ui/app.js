@@ -411,8 +411,18 @@ $('#top').addEventListener('mousedown', (e) => {
   const now = performance.now();
   if (now - lastDown < 380) { lastDown = 0; send({ t: 'win', a: 'max' }); return; }
   lastDown = now;
+  // Maximized: start the drag (which restores the window) only once the mouse moves,
+  // so clicking the empty toolbar or double-clicking doesn't restore it by accident.
+  if (S.max) { dragFrom = [e.screenX, e.screenY]; return; }
   send({ t: 'win', a: 'drag' });
 });
+let dragFrom = null;
+addEventListener('mousemove', (e) => {
+  if (!dragFrom) return;
+  if (!(e.buttons & 1)) { dragFrom = null; return; }
+  if (Math.hypot(e.screenX - dragFrom[0], e.screenY - dragFrom[1]) > 5) { dragFrom = null; send({ t: 'win', a: 'drag' }); }
+});
+addEventListener('mouseup', () => { dragFrom = null; });
 for (const r of document.querySelectorAll('.rz')) {
   r.addEventListener('mousedown', (e) => { if (e.button === 0) send({ t: 'win', a: 'resize', d: r.dataset.d }); });
 }
@@ -701,7 +711,7 @@ H.bar = (m) => {
   for (const l of kids.values()) l.sort((a, b) => a.pos - b.pos);
   S.bm = { kids, folders };
   if (settingsOpen() && S.setSec === 'bookmarks') renderSettings();
-  renderBar();
+  renderBmBar();
   refreshBmMenus();
 };
 const bmKids = (p) => S.bm.kids.get(p) || [];
@@ -730,9 +740,9 @@ function syncBar() {
   const on = mode === 'always' || (mode === 'start' && S.blank);
   if (document.body.classList.contains('bm-on') === on) return;
   document.body.classList.toggle('bm-on', on);
-  if (on) renderBar(); else closeBmMenus();
+  if (on) renderBmBar(); else closeBmMenus();
 }
-function renderBar() {
+function renderBmBar() {
   if (!document.body.classList.contains('bm-on')) return;
   const list = bmKids(0);
   bar.innerHTML = list.length
