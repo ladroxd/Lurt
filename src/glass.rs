@@ -34,14 +34,19 @@ pub fn set_window_opacity(window: &Window, percent: u8) {
 
 /// Apply a backdrop and return the one that actually took effect.
 /// Mica only exists on Windows 11; on Windows 10 it falls back to blur.
-pub fn apply(window: &Window, mode: &str) -> &'static str {
+///
+/// `dark` tints the blur itself (dark glass in dark mode, frosted in light mode), so
+/// lowering the UI's background opacity shows more of the desktop without washing it
+/// out to gray when what is behind the window is bright.
+pub fn apply(window: &Window, mode: &str, dark: bool) -> &'static str {
     clear(window);
+    let tint = if dark { (12, 13, 17, 165) } else { (238, 240, 245, 120) };
     let ok = |r: Result<(), window_vibrancy::Error>| r.is_ok();
     match mode {
         "none" => "none",
-        "mica" if ok(window_vibrancy::apply_mica(window, None)) => "mica",
-        "acrylic" if ok(window_vibrancy::apply_acrylic(window, Some((18, 18, 24, 40)))) => "acrylic",
-        _ if ok(window_vibrancy::apply_blur(window, None)) => "blur",
+        "mica" if ok(window_vibrancy::apply_mica(window, Some(dark))) => "mica",
+        "acrylic" if ok(window_vibrancy::apply_acrylic(window, Some(tint))) => "acrylic",
+        _ if ok(window_vibrancy::apply_blur(window, Some(tint))) => "blur",
         _ => "none",
     }
 }

@@ -53,7 +53,7 @@ impl Default for Settings {
         Self {
             theme: "system".into(),
             backdrop: "blur".into(),
-            tint: 60,
+            tint: 55,
             window_opacity: 100,
             accent: "#8ab4ff".into(),
             radius: 14,

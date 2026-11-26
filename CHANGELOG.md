@@ -13,7 +13,8 @@ All notable changes to Lurt are listed here, newest first.
 ### Added
 
 - Borderless liquid-glass window (blur, acrylic or mica backdrop) with dark, light and system themes, accent colors, roundness and a compact layout.
-- Background opacity (0% clear glass to 100% solid) and window opacity (fades the whole window, websites included) sliders.
+- The blur behind the window is tinted dark in dark mode and light in light mode, so low background opacity shows the desktop without washing the UI out to gray.
+- Background opacity and window opacity (fades the whole window, websites included) sliders.
 - The blur backdrop is re-applied on resize, so a maximized window no longer shows a gray rectangle where it used to be.
 - Native startup skeleton that appears in about 30 ms while WebView2 starts, and a page skeleton for tabs until their content is ready.
 - Tabs that share one engine process, open lazily, and sleep when idle.

@@ -142,7 +142,7 @@ fn main() {
     }
     let window = builder.build(&event_loop).expect("window");
     mark("window created");
-    let backdrop = glass::apply(&window, &settings.backdrop);
+    let backdrop = glass::apply(&window, &settings.backdrop, is_dark(&settings.theme));
     glass::set_window_opacity(&window, settings.window_opacity);
     mark("backdrop applied");
 
@@ -151,11 +151,7 @@ fn main() {
     let early = !bench() && std::env::var_os("LURT_NO_SPLASH").is_none();
     if early {
         window.set_visible(true);
-        let dark = match settings.theme.as_str() {
-            "dark" => true,
-            "light" => false,
-            _ => splash::system_dark(),
-        };
+        let dark = is_dark(&settings.theme);
         let session = store.load_session();
         let has_arg = std::env::args().skip(1).any(|a| !a.starts_with("--"));
         let blank = !has_arg
@@ -251,7 +247,7 @@ fn main() {
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     // Windows 10's blur stays at the old size/position after a maximize
                     // or restore unless it is applied again.
-                    app.backdrop = glass::apply(&app.window, &app.settings.backdrop);
+                    app.backdrop = glass::apply(&app.window, &app.settings.backdrop, is_dark(&app.settings.theme));
                     app.layout();
                     app.push_state();
                 }
@@ -700,8 +696,8 @@ impl App {
         }
         let old = std::mem::replace(&mut self.settings, new);
         let s = &self.settings;
-        if old.backdrop != s.backdrop {
-            self.backdrop = glass::apply(&self.window, &s.backdrop);
+        if old.backdrop != s.backdrop || old.theme != s.theme {
+            self.backdrop = glass::apply(&self.window, &s.backdrop, is_dark(&s.theme));
         }
         if old.window_opacity != s.window_opacity {
             glass::set_window_opacity(&self.window, s.window_opacity);
@@ -1154,5 +1150,14 @@ impl App {
             "key" => self.shortcut(&s("k")),
             _ => {}
         }
+    }
+}
+
+/// Whether the theme setting resolves to dark ("system" follows Windows).
+fn is_dark(theme: &str) -> bool {
+    match theme {
+        "dark" => true,
+        "light" => false,
+        _ => splash::system_dark(),
     }
 }

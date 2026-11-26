@@ -316,7 +316,7 @@ fn paint(w: i32, h: i32, look: &Look) -> (Vec<u32>, Vec<u8>) {
     // Opaque, in the colors the finished UI settles on. A see-through skeleton showed
     // whatever was behind the not-yet-painted window, which looked washed out.
     let (base, page, glass, bone) = if look.dark {
-        ((38, 40, 45), (44, 46, 52), (255, 255, 255), (255, 255, 255))
+        ((20, 21, 25), (27, 29, 34), (255, 255, 255), (255, 255, 255))
     } else {
         ((222, 226, 234), (232, 235, 242), (255, 255, 255), (20, 30, 60))
     };
