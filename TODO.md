@@ -31,6 +31,14 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] **Extensions page ("workshop").** A page listing installed extensions with on/off switches, details, permissions and remove, styled like Settings.
 - [ ] **Developer mode.** A switch on the extensions page that reveals "Load unpacked": pick a folder with a `manifest.json` and Lurt loads it, with a reload button for development.
 - [ ] **Built-in extensions.** Bundle the owner's own extensions with Lurt, turned off by default and enabled from the extensions page.
+- [ ] **Built-in: Video & audio downloader.** A download button on YouTube (and other video sites it supports) to save as MP3, M4A, OPUS, WAV or FLAC audio, or MP4, WEBM or MKV video. Pick the quality (up to 4K and 60 fps), download whole playlists, and choose subtitles and the thumbnail. Built on yt-dlp and ffmpeg, downloaded on first use rather than bundled, with progress in the downloads panel. Only for videos you're allowed to download.
+- [ ] **Built-in: PDF tools.** In Lurt's PDF viewer: free draw with pen, highlighter and eraser (colors and sizes), text boxes, shapes and arrows, sticky notes, highlight and underline text, sign with a drawn or typed signature, fill forms, and save the edited PDF or export pages as images. Undo and redo, and annotations stay editable after saving.
+- [ ] **Built-in: Screenshot tool.** Capture the visible page, the full scrolling page or a selected area, then draw on it, blur parts out and copy or save it.
+- [ ] **Built-in: Picture-in-picture.** A button on any video to pop it out into a small always-on-top window.
+- [ ] **Built-in: Dark mode for every site.** Darkens sites that have no dark theme, with a per-site switch.
+- [ ] **Built-in: Translate page.** Translate the whole page or a selection in place.
+- [ ] **Built-in: Reader mode.** Shows just the article text with adjustable font, size and width, and read aloud.
+- [ ] **Built-in: Color picker and page tools.** Pick any color on a page, measure elements, and see fonts used.
 - [ ] Extension toolbar buttons (pinned icons next to the shield) and their popups.
 - [ ] Install from the Chrome Web Store, if WebView2 allows it, or from a `.crx` / `.zip` file.
 
