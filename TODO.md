@@ -8,6 +8,11 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] Push `main`, then tag `v0.1.0` and push the tag. The release workflow builds `lurt.exe` and opens a **draft** release with the notes from `.github/release-notes/v0.1.0.md`.
 - [ ] Review the draft release on GitHub and publish it.
 
+## Account
+
+- [ ] **Sync Lurt settings to the Google account.** Store settings (and later bookmarks) in the account's Google Drive app data folder, which only Lurt can see. Needs a Google Cloud project with an OAuth client ID for a desktop app (owner to create it), sign-in through the system browser with PKCE, the `drive.appdata` scope, and a "Sync now / last synced" row in Settings > Account. Until then, Settings > Account saves and loads settings as a file.
+- [ ] Show the account photo even before Google's photo server is reachable (cache it in the profile).
+
 ## Extensions
 
 - [ ] **Chrome extension support.** Load Chrome extensions (Manifest V3) through WebView2's browser extension API (`AreBrowserExtensionsEnabled`, `ICoreWebView2Profile7::AddBrowserExtension`). Check which APIs WebView2 supports and show a clear message for extensions that need unsupported ones.

@@ -333,6 +333,12 @@ impl Store {
         let _ = self.db.execute_batch("DELETE FROM history; VACUUM;");
     }
 
+    /// How much is saved: (bookmarks, folders, history entries).
+    pub fn counts(&self) -> (i64, i64, i64) {
+        let n = |sql: &str| self.db.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+        (n("SELECT COUNT(*) FROM bookmarks"), n("SELECT COUNT(*) FROM bm_folders"), n("SELECT COUNT(*) FROM history"))
+    }
+
     /// Delete these pages from history. Returns how many went.
     pub fn delete_history_many(&self, urls: &[String]) -> usize {
         let Ok(tx) = self.db.unchecked_transaction() else { return 0 };

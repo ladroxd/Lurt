@@ -3,6 +3,7 @@
 //! Lurt: a light browser. One borderless glass window, one small HTML layer for the
 //! browser UI ("chrome"), and one WebView2 per awake tab, all sharing one engine process.
 
+mod account;
 mod blocker;
 mod glass;
 mod importer;
@@ -60,6 +61,9 @@ pub enum Ev {
     ShieldFailed,
     /// Import finished: (bookmarks added, history entries merged) or an error.
     Imported(Result<(usize, usize), String>, String),
+    /// Google accounts signed in to the browser, or why they couldn't be read.
+    Accounts(Result<Vec<account::Account>, String>),
+    SignedOut,
 }
 
 const UI_HTML: &str = include_str!("../ui/index.html");
@@ -92,6 +96,9 @@ struct App {
     overlay: bool,
     /// When to re-present the window so the Windows 10 blur covers its new size.
     glass_fix_at: Option<Instant>,
+    /// When to look up the signed-in Google account again (after Google pages load).
+    account_at: Option<Instant>,
+    accounts: Vec<account::Account>,
     /// "Maximized": Lurt fills the work area as a normal window, because Windows 10 paints
     /// the blur of a truly maximized window with a light gray fill (the browser looked
     /// brighter maximized). Holds the position and size to restore.
@@ -238,6 +245,8 @@ fn main() {
         fullscreen: false,
         overlay: false,
         glass_fix_at: None,
+        account_at: Some(Instant::now() + Duration::from_secs(2)),
+        accounts: Vec::new(),
         zoom: None,
         pruned_at: None,
         ui_ready: false,
@@ -281,12 +290,19 @@ fn main() {
             },
             _ => {}
         }
+        if app.ui_ready && app.account_at.is_some_and(|t| t <= Instant::now()) {
+            app.account_at = None;
+            account::refresh(&app.chrome, app.proxy.clone());
+        }
         if app.glass_fix_at.is_some_and(|t| t <= Instant::now()) {
             app.glass_fix_at = None;
             glass::refresh(&app.window);
         }
         let mut wake = app.tabs.iter().filter_map(|t| t.reveal_by).min().map_or(next_tick, |r| r.min(next_tick));
         if let Some(t) = app.glass_fix_at {
+            wake = wake.min(t);
+        }
+        if let Some(t) = app.account_at.filter(|_| app.ui_ready) {
             wake = wake.min(t);
         }
         *cf = ControlFlow::WaitUntil(wake);
@@ -956,6 +972,11 @@ impl App {
                 }
                 if !started {
                     self.reveal(id);
+                    // Signing in or out on a Google page: refresh the account button.
+                    let host = util::host_of(&url);
+                    if host == "google.com" || host.ends_with(".google.com") {
+                        self.account_at = Some(Instant::now() + Duration::from_millis(800));
+                    }
                 }
                 let Some(t) = self.tab_mut(id) else { return };
                 t.loading = started;
@@ -1041,6 +1062,28 @@ impl App {
                 }
             }
             Ev::ShieldFailed => self.toast("Couldn't download filter lists. Blocking is off until it can."),
+            Ev::Accounts(result) => {
+                let ok = result.is_ok();
+                if let Ok(list) = result {
+                    self.accounts = list;
+                }
+                self.send(json!({ "t": "account", "accounts": self.accounts, "ok": ok }));
+            }
+            Ev::SignedOut => {
+                self.accounts.clear();
+                self.toast("Signed out of Google");
+                self.send(json!({ "t": "account", "accounts": self.accounts, "ok": true }));
+                // Reload open Google pages so they show you signed out too.
+                for t in &self.tabs {
+                    if let Some(v) = &t.view {
+                        let h = util::host_of(&t.url);
+                        if h == "google.com" || h.ends_with(".google.com") || h.ends_with("youtube.com") {
+                            let _ = v.reload();
+                        }
+                    }
+                }
+                self.account_at = Some(Instant::now() + Duration::from_millis(500));
+            }
             Ev::Imported(result, from) => {
                 let text = match result {
                     Ok((b, h)) => format!("Imported from {from}: {b} new bookmarks, {h} history entries"),
@@ -1244,6 +1287,20 @@ impl App {
                 self.store.delete_history(&s("url"));
                 self.send_list("history", &s("q"));
             }
+            "account" => {
+                self.send(json!({ "t": "account", "accounts": self.accounts, "ok": true }));
+                self.account_at = Some(Instant::now());
+            }
+            "signOut" => account::sign_out(&self.chrome, self.proxy.clone()),
+            "dataInfo" => {
+                let (bookmarks, folders, history) = self.store.counts();
+                let size = |p: std::path::PathBuf| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                self.send(json!({
+                    "t": "dataInfo", "bookmarks": bookmarks, "folders": folders, "history": history,
+                    "dir": self.store.dir.to_string_lossy(), "dbBytes": size(self.store.db_path()),
+                    "webDir": Store::webview_dir().to_string_lossy(),
+                }));
+            }
             "delBookmark" => {
                 self.store.remove_bookmark(&s("url"));
                 self.bookmarks_changed();
@@ -1330,6 +1387,44 @@ impl App {
                     let _ = v.reload();
                 }
                 self.toast("Mods reloaded");
+            }
+            "openData" => {
+                let _ = std::process::Command::new("explorer").arg(&self.store.dir).spawn();
+            }
+            "exportSettings" => {
+                let dir = dirs::download_dir().unwrap_or_else(|| self.store.dir.clone());
+                let path = dir.join("Lurt settings.json");
+                let text = serde_json::to_string_pretty(&json!({ "lurt": "settings", "version": 1, "settings": self.settings }));
+                match text.map_err(|e| e.to_string()).and_then(|t| std::fs::write(&path, t).map_err(|e| e.to_string())) {
+                    Ok(()) => {
+                        self.toast("Settings saved to Downloads");
+                        let _ = std::process::Command::new("explorer").arg("/select,").arg(&path).spawn();
+                    }
+                    Err(e) => self.toast(&format!("Couldn't save settings: {e}")),
+                }
+            }
+            "importSettings" => {
+                let v: Value = serde_json::from_str(&s("text")).unwrap_or(Value::Null);
+                // A file saved by Lurt, or a bare settings.json.
+                let raw = if v.get("lurt").and_then(Value::as_str) == Some("settings") { v["settings"].clone() } else { v };
+                // Apply the keys Lurt knows on top of the current settings; ignore the rest.
+                let mut cur = serde_json::to_value(&self.settings).unwrap_or(Value::Null);
+                let mut known = 0;
+                if let (Some(src), Some(dst)) = (raw.as_object(), cur.as_object_mut()) {
+                    for (k, v) in src {
+                        if dst.contains_key(k) {
+                            dst.insert(k.clone(), v.clone());
+                            known += 1;
+                        }
+                    }
+                }
+                match (known > 0).then(|| serde_json::from_value::<Settings>(cur).ok()).flatten() {
+                    Some(new) => {
+                        self.apply_settings(new);
+                        self.toast("Settings loaded");
+                    }
+                    None => self.toast("That file doesn't contain Lurt settings"),
+                }
             }
             "openMods" => {
                 let _ = std::process::Command::new("explorer").arg(self.store.mods_dir()).spawn();

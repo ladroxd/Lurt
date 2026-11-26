@@ -12,6 +12,10 @@ const P = {
   reload: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   home: '<path d="M4.5 10.5L12 4l7.5 6.5V19a1 1 0 0 1-1 1H15v-5.5H9V20H5.5a1 1 0 0 1-1-1z"/>',
   plus: '<path d="M12 5.5v13M5.5 12h13"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c1.2-3.8 4-5.5 7.5-5.5s6.3 1.7 7.5 5.5"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.4 3.4-5 6.5-5s5.5 1.6 6.5 5M16 4.6a3.5 3.5 0 0 1 0 6.8M18 15.2c1.8.7 3 2.3 3.5 4.8"/>',
+  logout: '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h10"/>',
+  upload: '<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   star: '<path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z"/>',
   shield: '<path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.9-7 9-4-1.1-7-4.7-7-9V6.3z"/><path d="M9 12l2 2 4-4"/>',
@@ -1175,6 +1179,11 @@ const F = {
   updateLists: { type: 'buttons', items: [['updateLists', 'refresh', 'Update filter lists']] },
 };
 const SECTIONS = [
+  { id: 'account', icon: 'user', title: 'Account', groups: [
+    ['Google account', [{ type: 'account', label: 'Google account', kw: 'profile sign in sign out gmail switch' }]],
+    ['What Lurt saves on this PC', [{ type: 'saved', label: 'What gets saved', kw: 'data storage profile folder cookies passwords' }]],
+    ['Lurt profile', [{ type: 'profileSync', label: 'Back up Lurt settings', kw: 'sync backup export import restore settings account' }]],
+  ] },
   { id: 'appearance', icon: 'palette', title: 'Appearance', groups: [
     ['Theme', [
       { k: 'theme', label: 'Mode', type: 'seg', opts: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] },
@@ -1253,6 +1262,7 @@ function openSettings(sec) {
   renderSetNav();
   renderSettings(true);
   if (S.setSec === 'data') send({ t: 'importSources' });
+  if (S.setSec === 'account') { send({ t: 'account' }); send({ t: 'dataInfo' }); }
 }
 function closeSettings() { if (settingsOpen()) closeOverlay(false); }
 function renderSetNav() {
@@ -1508,6 +1518,33 @@ function field(it, s) {
         `<label class="btn" ${busy ? 'style="opacity:.5;pointer-events:none"' : ''}>${icon('folder')}Import files<input type="file" id="import-file" accept=".json,.html,.htm" multiple hidden></label></div>` +
         `<div class="hint">Passwords and signed-in sessions can't be copied: Chrome encrypts them so only Chrome can read them. Sign in once in Lurt and it remembers you.</div>`;
     }
+    case 'account': {
+      const [g, ...more] = S.accounts;
+      if (!g) return `<div class="acct-card">${avatar(null, 52)}<div class="lbl"><b>Not signed in</b><small>Sign in to Google once and Gmail, YouTube and the other Google sites stay signed in. Your account then shows at the top right.</small></div></div>` +
+        `<div class="btns"><button class="btn primary" data-ga="signIn">${icon('user')}Sign in to Google</button></div>`;
+      return `<div class="acct-card">${avatar(g, 52)}<div class="lbl"><b>${esc(g.name || 'Google account')}</b><small>${esc(g.email)}</small>` +
+        (more.length ? `<small>Also signed in: ${more.map((o) => esc(o.email)).join(', ')}</small>` : '') + '</div></div>' +
+        `<div class="btns"><button class="btn" data-ga="manage">${icon('external')}Manage your Google Account</button>` +
+        `<button class="btn" data-ga="choose">${icon('users')}Switch account</button>` +
+        `<button class="btn" data-ga="add">${icon('plus')}Add account</button>` +
+        `<button class="btn danger" data-ga="out">${icon('logout')}Sign out of Google</button></div>`;
+    }
+    case 'saved': {
+      const d = S.dataInfo; const n = (x) => (d ? Number(x).toLocaleString() : '…');
+      const mb = d ? (d.dbBytes / 1048576).toFixed(1) + ' MB' : '…';
+      const row = (ic, t, u) => `<div class="saved-row">${icon(ic)}<div class="lbl"><b>${t}</b><small>${u}</small></div></div>`;
+      return `<div class="saved">` +
+        row('gear', 'Settings', 'Theme, glass, layout, search engine and everything else on these pages') +
+        row('star', `${n(d?.bookmarks)} bookmarks in ${n(d?.folders)} folders`, 'With their order on the bookmarks bar') +
+        row('clock', `${n(d?.history)} history entries`, S.settings?.history_days ? `Deleted after ${S.settings.history_days} days` : 'Kept until you clear them') +
+        row('globe', 'Cookies, sign-ins and site data', 'Including your Google sign-in. Passwords and forms when you allow it') +
+        `</div><div class="hint">Everything stays on this PC (${mb} database). Nothing is sent to Lurt. Folder: ${esc(d?.dir || '')}</div>` +
+        `<div class="btns"><button class="btn" data-act="openData">${icon('folder')}Open data folder</button><button class="btn" data-go="sec:privacy">${icon('trash')}Clear browsing data</button></div>`;
+    }
+    case 'profileSync':
+      return `<div class="lbl"><small>Save your Lurt settings to a file and load them on another PC or after reinstalling. Syncing them to your Google account is coming: it needs Lurt to be registered with Google first.</small></div>` +
+        `<div class="btns"><button class="btn" data-act="exportSettings">${icon('download')}Save settings to a file</button>` +
+        `<label class="btn">${icon('upload')}Load settings from a file<input type="file" id="settings-file" accept=".json" hidden></label></div>`;
     case 'about':
       return `<div class="about"><span class="logo">${LOGO}</span><div><b>Lurt 0.1.0</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
         `<div class="btns"><button class="btn" data-open="https://github.com/ladroxd/Lurt">${icon('external')}Project page</button><button class="btn" data-open="https://github.com/ladroxd/Lurt/releases">${icon('download')}Releases</button></div>`;
@@ -1636,3 +1673,94 @@ addEventListener('keydown', (e) => {
 addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 
 send({ t: 'ready' });
+
+// ---- Google account ------------------------------------------------------------------
+// The account signed in to Google in this browser (read by Rust from Google's own
+// cookies), shown as an avatar at the top right with a profile popover.
+S.accounts = []; S.dataInfo = null;
+const acctBtn = $('#acct'); const acctPop = $('#acct-pop');
+const GOOGLE = {
+  signIn: 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmyaccount.google.com%2F',
+  manage: 'https://myaccount.google.com/',
+  choose: 'https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fmyaccount.google.com%2F',
+  add: 'https://accounts.google.com/AddSession?continue=https%3A%2F%2Fmyaccount.google.com%2F',
+};
+function avatar(a, size) {
+  const initial = esc(((a && (a.name || a.email)) || '?').trim()[0]?.toUpperCase() || '?');
+  if (!a) return `<span class="av none" style="--s:${size}px">${icon('user')}</span>`;
+  const bg = `hsl(${hue(a.email)} 55% 45%)`;
+  const photo = a.photo ? `<img src="${esc(a.photo)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  return `<span class="av" style="--s:${size}px;background:${bg}">${initial}${photo}</span>`;
+}
+H.account = (m) => {
+  S.accounts = m.accounts || [];
+  renderAcct();
+  if (S.overlay === 'acct-open') renderAcctPop();
+  if (settingsOpen() && S.setSec === 'account') renderSettings();
+};
+H.dataInfo = (m) => { S.dataInfo = m; if (settingsOpen() && S.setSec === 'account') renderSettings(); };
+function renderAcct() {
+  const a = S.accounts[0];
+  acctBtn.innerHTML = avatar(a, 22);
+  acctBtn.title = a ? `${a.name || 'Google account'}\n${a.email}` : 'Sign in to Google';
+  acctBtn.classList.toggle('on', !!a);
+}
+function renderAcctPop() {
+  const [a, ...more] = S.accounts;
+  acctPop.innerHTML = a
+    ? `<div class="me">${avatar(a, 64)}<b>${esc(a.name || 'Google account')}</b><small>${esc(a.email)}</small>` +
+      `<button class="btn" data-ga="manage">Manage your Google Account</button></div>` +
+      (more.length ? `<div class="others">` + more.map((o) => `<div class="other">${avatar(o, 28)}<div class="txt"><span class="t">${esc(o.name || o.email)}</span><span class="u">${esc(o.email)}</span></div></div>`).join('') + '</div>' : '') +
+      `<div class="acts">` +
+      `<button data-ga="choose">${icon('users')}Switch account</button>` +
+      `<button data-ga="add">${icon('plus')}Add another account</button>` +
+      `<button data-ga="settings">${icon('gear')}Account & data in Settings</button>` +
+      `<button data-ga="out" class="danger">${icon('logout')}Sign out of Google</button></div>`
+    : `<div class="me">${avatar(null, 64)}<b>Not signed in</b><small>Sign in to Google to use Gmail, YouTube and other Google sites signed in, and see your account here.</small>` +
+      `<button class="btn primary" data-ga="signIn">Sign in to Google</button></div>` +
+      `<div class="acts"><button data-ga="settings">${icon('gear')}Account & data in Settings</button></div>`;
+}
+function placeAcct() {
+  const r = acctBtn.getBoundingClientRect();
+  acctPop.style.top = r.bottom + 8 + 'px';
+  acctPop.style.left = Math.max(8, Math.min(r.right - 300 + 6, innerWidth - 308)) + 'px';
+}
+function openAcct() {
+  if (settingsOpen()) return;
+  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'bm-open') closeBmMenus();
+  if (S.overlay) closeOverlay(false);
+  renderAcctPop(); placeAcct();
+  openOverlay('acct-open');
+  send({ t: 'account' });
+}
+function closeAcct(focusPage) { if (S.overlay === 'acct-open') closeOverlay(focusPage); }
+acctBtn.onclick = () => (S.overlay === 'acct-open' ? closeAcct(true) : openAcct());
+function googleAction(ga) {
+  if (ga === 'out') {
+    // A second click confirms, like the other destructive buttons.
+    const b = document.querySelector('[data-ga="out"]');
+    if (b && !b.classList.contains('armed')) {
+      document.querySelectorAll('[data-ga="out"]').forEach((x) => { x.classList.add('armed'); x._l = x.innerHTML; x.innerHTML = 'Click again to sign out'; });
+      setTimeout(() => document.querySelectorAll('[data-ga="out"].armed').forEach((x) => { x.classList.remove('armed'); x.innerHTML = x._l; }), 3000);
+      return;
+    }
+    send({ t: 'signOut' }); closeAcct(false); return;
+  }
+  if (ga === 'settings') { closeAcct(false); openSettings('account'); return; }
+  if (GOOGLE[ga]) { closeAcct(false); closeSettings(); send({ t: 'open', url: GOOGLE[ga], newTab: true }); }
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('#settings [data-ga]'); if (b) googleAction(b.dataset.ga); });
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'settings-file' || !e.target.files[0]) return;
+  e.target.files[0].text().then((text) => send({ t: 'importSettings', text }));
+  e.target.value = '';
+});
+acctPop.addEventListener('click', (e) => { const b = e.target.closest('[data-ga]'); if (b) googleAction(b.dataset.ga); });
+addEventListener('mousedown', (e) => {
+  if (S.overlay === 'acct-open' && !acctPop.contains(e.target) && !acctBtn.contains(e.target)) closeAcct(false);
+}, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'acct-open') { e.preventDefault(); closeAcct(true); } });
+addEventListener('resize', () => S.overlay === 'acct-open' && placeAcct());
+renderAcct();
+
