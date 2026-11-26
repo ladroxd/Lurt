@@ -1067,11 +1067,11 @@ impl App {
             }
             Ev::ShieldFailed => self.toast("Couldn't download filter lists. Blocking is off until it can."),
             Ev::Accounts(result) => {
-                let ok = result.is_ok();
+                let err = result.as_ref().err().cloned();
                 if let Ok(list) = result {
                     self.accounts = list;
                 }
-                self.send(json!({ "t": "account", "accounts": self.accounts, "ok": ok }));
+                self.send(json!({ "t": "account", "accounts": self.accounts, "ok": err.is_none(), "err": err }));
             }
             Ev::SignedOut => {
                 self.accounts.clear();

@@ -75,9 +75,10 @@ fn lookup(cookies: &str) -> Result<Vec<Account>, String> {
     if !cookies.contains("SID=") {
         return Ok(Vec::new());
     }
-    let body = ureq::get(LIST_URL)
+    // Google only answers this as a POST (like Chrome sends it); a GET gets a 400 page.
+    let body = ureq::post(LIST_URL)
         .header("Cookie", cookies)
-        .call()
+        .send_empty()
         .map_err(|e| e.to_string())?
         .body_mut()
         .read_to_string()
