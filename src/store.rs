@@ -50,6 +50,10 @@ pub struct Settings {
     pub shortcuts: Vec<Shortcut>,
     /// Sites (hosts) removed from the start page's most-visited tiles.
     pub hidden_tiles: Vec<String>,
+    /// Bookmarks bar under the toolbar: "always" | "start" (start page only) | "never".
+    pub bookmarks_bar: String,
+    /// Delete history older than this many days, automatically. 0 = keep forever.
+    pub history_days: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -84,6 +88,8 @@ impl Default for Settings {
             autofill: true,
             shortcuts: Vec::new(),
             hidden_tiles: Vec::new(),
+            bookmarks_bar: "always".into(),
+            history_days: 0,
         }
     }
 }
@@ -98,6 +104,29 @@ pub struct Session {
 pub struct SessionTab {
     pub url: String,
     pub title: String,
+}
+
+/// The bookmarks bar as flat lists; `parent` 0 is the bar itself.
+#[derive(Serialize)]
+pub struct BarFolder {
+    pub id: i64,
+    pub title: String,
+    pub parent: i64,
+    pub pos: f64,
+}
+
+#[derive(Serialize)]
+pub struct BarItem {
+    pub url: String,
+    pub title: String,
+    pub parent: i64,
+    pub pos: f64,
+}
+
+/// One entry in a reorder request: a folder (by id) or a bookmark (by url).
+pub enum Slot {
+    Folder(i64),
+    Mark(String),
 }
 
 #[derive(Serialize)]
@@ -125,6 +154,48 @@ fn like(q: &str) -> String {
     format!("%{esc}%")
 }
 
+/// Bookmarks gained a place on the bar (folder + order). Older profiles get the
+/// columns, keeping their old newest-first order.
+pub fn migrate_bookmarks(db: &Connection) {
+    if db.prepare("SELECT parent FROM bookmarks LIMIT 0").is_err() {
+        let _ = db.execute_batch(
+            "ALTER TABLE bookmarks ADD COLUMN parent INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE bookmarks ADD COLUMN pos REAL NOT NULL DEFAULT 0;
+             UPDATE bookmarks SET pos = -created;",
+        );
+    }
+}
+
+/// Find a folder by name inside `parent`, creating it at the end if it's missing.
+pub fn folder_in(db: &Connection, parent: i64, title: &str) -> i64 {
+    if let Ok(id) = db.query_row(
+        "SELECT id FROM bm_folders WHERE parent = ?1 AND title = ?2",
+        params![parent, title],
+        |r| r.get(0),
+    ) {
+        return id;
+    }
+    let pos = next_pos(db, parent);
+    let _ = db.execute(
+        "INSERT INTO bm_folders(title, parent, pos) VALUES(?1, ?2, ?3)",
+        params![title, parent, pos],
+    );
+    db.last_insert_rowid()
+}
+
+/// The position after the last folder or bookmark in `parent`.
+pub fn next_pos(db: &Connection, parent: i64) -> f64 {
+    db.query_row(
+        "SELECT MAX(p) FROM (SELECT MAX(pos) p FROM bookmarks WHERE parent = ?1
+                             UNION ALL SELECT MAX(pos) p FROM bm_folders WHERE parent = ?1)",
+        params![parent],
+        |r| r.get::<_, Option<f64>>(0),
+    )
+    .ok()
+    .flatten()
+    .map_or(0.0, |p| p + 1.0)
+}
+
 impl Store {
     pub fn open() -> Self {
         // LURT_DATA points the profile elsewhere (benchmarks, portable installs).
@@ -146,8 +217,12 @@ impl Store {
                 visits INTEGER NOT NULL DEFAULT 1, last INTEGER NOT NULL);
              CREATE INDEX IF NOT EXISTS history_last ON history(last DESC);
              CREATE TABLE IF NOT EXISTS bookmarks(
-                url TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);",
+                url TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS bm_folders(
+                id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
+                parent INTEGER NOT NULL DEFAULT 0, pos REAL NOT NULL DEFAULT 0);",
         );
+        migrate_bookmarks(&db);
         Self { db, dir }
     }
 
@@ -156,6 +231,10 @@ impl Store {
     }
 
     pub fn webview_dir() -> PathBuf {
+        // A custom profile (LURT_DATA) keeps its own cookies and cache too.
+        if let Some(d) = std::env::var_os("LURT_DATA") {
+            return PathBuf::from(d).join("WebView");
+        }
         dirs::data_local_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("Lurt")
@@ -254,6 +333,39 @@ impl Store {
         let _ = self.db.execute_batch("DELETE FROM history; VACUUM;");
     }
 
+    /// Delete these pages from history. Returns how many went.
+    pub fn delete_history_many(&self, urls: &[String]) -> usize {
+        let Ok(tx) = self.db.unchecked_transaction() else { return 0 };
+        let mut n = 0;
+        for u in urls {
+            n += tx.execute("DELETE FROM history WHERE url = ?1", params![u]).unwrap_or(0);
+        }
+        let _ = tx.commit();
+        n
+    }
+
+    /// Delete what was visited in the last `secs` seconds (0 = everything).
+    pub fn clear_history_since(&self, secs: i64) -> usize {
+        if secs <= 0 {
+            let n = self.db.query_row("SELECT COUNT(*) FROM history", [], |r| r.get::<_, i64>(0)).unwrap_or(0);
+            self.clear_history();
+            return n as usize;
+        }
+        self.db
+            .execute("DELETE FROM history WHERE last >= ?1", params![now() - secs])
+            .unwrap_or(0)
+    }
+
+    /// Auto-delete: drop history older than `days` days.
+    pub fn prune_history(&self, days: u32) -> usize {
+        if days == 0 {
+            return 0;
+        }
+        self.db
+            .execute("DELETE FROM history WHERE last < ?1", params![now() - i64::from(days) * 86_400])
+            .unwrap_or(0)
+    }
+
     // ---- bookmarks -------------------------------------------------------------
 
     pub fn bookmarks(&self) -> Vec<Entry> {
@@ -275,11 +387,108 @@ impl Store {
             self.remove_bookmark(url);
             false
         } else {
-            let _ = self.db.execute(
-                "INSERT OR REPLACE INTO bookmarks(url, title, created) VALUES(?1, ?2, ?3)",
-                params![url, title, now()],
-            );
+            self.add_bookmark(url, title, 0);
             true
+        }
+    }
+
+    /// Add (or move) a bookmark to the end of a folder on the bar.
+    pub fn add_bookmark(&self, url: &str, title: &str, parent: i64) {
+        let pos = next_pos(&self.db, parent);
+        let _ = self.db.execute(
+            "INSERT INTO bookmarks(url, title, created, parent, pos) VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(url) DO UPDATE SET parent = ?4, pos = ?5,
+               title = CASE WHEN ?2 = '' THEN title ELSE ?2 END",
+            params![url, title, now(), parent, pos],
+        );
+    }
+
+    /// Everything on the bar, for the UI to build its tree.
+    pub fn bar(&self) -> (Vec<BarFolder>, Vec<BarItem>) {
+        let folders = self
+            .db
+            .prepare("SELECT id, title, parent, pos FROM bm_folders")
+            .and_then(|mut s| {
+                s.query_map([], |r| {
+                    Ok(BarFolder { id: r.get(0)?, title: r.get(1)?, parent: r.get(2)?, pos: r.get(3)? })
+                })
+                .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
+        let items = self
+            .db
+            .prepare("SELECT url, title, parent, pos FROM bookmarks")
+            .and_then(|mut s| {
+                s.query_map([], |r| {
+                    Ok(BarItem { url: r.get(0)?, title: r.get(1)?, parent: r.get(2)?, pos: r.get(3)? })
+                })
+                .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
+        (folders, items)
+    }
+
+    pub fn add_folder(&self, title: &str, parent: i64) -> i64 {
+        let pos = next_pos(&self.db, parent);
+        let _ = self.db.execute(
+            "INSERT INTO bm_folders(title, parent, pos) VALUES(?1, ?2, ?3)",
+            params![title, parent, pos],
+        );
+        self.db.last_insert_rowid()
+    }
+
+    pub fn rename_folder(&self, id: i64, title: &str) {
+        let _ = self.db.execute("UPDATE bm_folders SET title = ?2 WHERE id = ?1", params![id, title]);
+    }
+
+    /// Delete a folder with everything inside it.
+    pub fn delete_folder(&self, id: i64) {
+        let _ = self.db.execute_batch(&format!(
+            "WITH RECURSIVE sub(id) AS (SELECT {id} UNION SELECT f.id FROM bm_folders f JOIN sub ON f.parent = sub.id)
+             DELETE FROM bookmarks WHERE parent IN sub;
+             WITH RECURSIVE sub(id) AS (SELECT {id} UNION SELECT f.id FROM bm_folders f JOIN sub ON f.parent = sub.id)
+             DELETE FROM bm_folders WHERE id IN sub;"
+        ));
+    }
+
+    /// Change a bookmark's address and/or name.
+    pub fn edit_bookmark(&self, url: &str, new_url: &str, title: &str) {
+        if url != new_url && self.is_bookmarked(new_url) {
+            self.remove_bookmark(new_url);
+        }
+        let _ = self.db.execute(
+            "UPDATE bookmarks SET url = ?2, title = ?3 WHERE url = ?1",
+            params![url, new_url, title],
+        );
+    }
+
+    /// Put these folders and bookmarks into `parent`, in this order.
+    pub fn reorder(&self, parent: i64, slots: &[Slot]) {
+        // A folder can't go inside itself or one of its own subfolders.
+        let mut p = parent;
+        for _ in 0..64 {
+            if p == 0 {
+                break;
+            }
+            if slots.iter().any(|s| matches!(s, Slot::Folder(id) if *id == p)) {
+                return;
+            }
+            p = self
+                .db
+                .query_row("SELECT parent FROM bm_folders WHERE id = ?1", params![p], |r| r.get(0))
+                .unwrap_or(0);
+        }
+        for (i, s) in slots.iter().enumerate() {
+            let _ = match s {
+                Slot::Folder(id) => self.db.execute(
+                    "UPDATE bm_folders SET parent = ?2, pos = ?3 WHERE id = ?1",
+                    params![id, parent, i as f64],
+                ),
+                Slot::Mark(url) => self.db.execute(
+                    "UPDATE bookmarks SET parent = ?2, pos = ?3 WHERE url = ?1",
+                    params![url, parent, i as f64],
+                ),
+            };
         }
     }
 

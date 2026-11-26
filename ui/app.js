@@ -38,8 +38,11 @@ const P = {
   edit: '<path d="M14.5 5.5l4 4L9 19H5v-4z"/>',
   external: '<path d="M13.5 5.5h5v5M18.5 5.5L11 13M17 13.5V18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4.5"/>',
   download: '<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
+// The Lurt logo (assets/lurt.svg): two clear-glass bars crossing into an L.
+const LOGO = '<svg viewBox="0 0 100 100" aria-hidden="true"><defs> <linearGradient id="lg-tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="#0e1219"/></linearGradient> <radialGradient id="lg-glow" cx=".3" cy=".22" r=".85"><stop offset="0" stop-color="#fff" stop-opacity=".12"/><stop offset=".7" stop-color="#fff" stop-opacity="0"/></radialGradient> <linearGradient id="lg-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity=".7"/></linearGradient> <linearGradient id="lg-rim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".45" stop-color="#fff" stop-opacity=".15"/><stop offset="1" stop-color="#fff" stop-opacity=".45"/></linearGradient> </defs> <rect x="2" y="2" width="96" height="96" rx="26" fill="url(#lg-tile)"/> <rect x="2" y="2" width="96" height="96" rx="26" fill="url(#lg-glow)"/> <rect x="2.5" y="2.5" width="95" height="95" rx="25.5" fill="none" stroke="#fff" stroke-opacity=".14"/> <g transform="translate(18 18) scale(.64)"> <rect x="22" y="12" width="20" height="76" rx="10" fill="url(#lg-body)" fill-opacity=".22"/> <rect x="22.5" y="12.5" width="19" height="75" rx="9.5" fill="none" stroke="url(#lg-rim)" stroke-width="1.6"/> <rect x="22" y="68" width="62" height="20" rx="10" fill="url(#lg-body)" fill-opacity=".2"/> <rect x="22.5" y="68.5" width="61" height="19" rx="9.5" fill="none" stroke="url(#lg-rim)" stroke-width="1.6"/> </g></svg>';
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
 const WIN = {
   min: '<svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg>',
@@ -129,6 +132,7 @@ const H = {
     if (!m.img) { S.previews.delete(m.id); renderWake(cur()); return; }
     shrinkPreview(m.img).then((small) => { S.previews.set(m.id, small); renderWake(cur()); });
   },
+  pageDown() { if (S.panel) closePanel(); },
   shieldInfo(m) {
     if (m.id !== S.active) return;
     S.shieldInfo = m;
@@ -151,6 +155,7 @@ function applyLook() {
   root.toggleAttribute('data-compact', !!s.compact);
   root.toggleAttribute('data-calm', !!s.reduce_motion);
   root.toggleAttribute('data-noclock', !s.show_clock);
+  syncBar();
   $('#ui-css').textContent = s.ui_css || '';
   requestAnimationFrame(sendInsets);
 }
@@ -531,6 +536,7 @@ function renderStart() {
   if (blank && !S.blank) send({ t: 'list', kind: 'top' });
   if (blank && !S.blankInit) { S.blankInit = true; send({ t: 'list', kind: 'top' }); }
   S.blank = blank;
+  syncBar();
 }
 // Favourites (pinned by you) come first, then most-visited sites you haven't removed.
 S.top = [];
@@ -612,7 +618,11 @@ function showMenu(x, y, items) {
   ctx.style.left = Math.max(6, Math.min(x, innerWidth - ctx.offsetWidth - 6)) + 'px';
   ctx.style.top = Math.max(6, Math.min(y, innerHeight - ctx.offsetHeight - 6)) + 'px';
 }
-function hideMenu() { document.body.classList.remove('ctx-open'); }
+function hideMenu() {
+  if (!document.body.classList.contains('ctx-open')) return;
+  document.body.classList.remove('ctx-open');
+  bmSync();
+}
 ctx.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-i]'); if (!b) return;
   const it = ctx._items[+b.dataset.i]; hideMenu(); it.run();
@@ -624,6 +634,7 @@ addEventListener('blur', hideMenu);
 const dlg = $('#tile-dlg');
 function editTile(t) {
   dlg._orig = t ? t.url : null;
+  dlg._save = null;
   dlg.innerHTML = `<h3>${t ? 'Edit favourite' : 'Add a favourite'}</h3>` +
     `<label>Address<input class="field" id="td-url" value="${esc(t?.url || '')}" placeholder="youtube.com" spellcheck="false"></label>` +
     `<label>Name<input class="field" id="td-name" value="${esc(t ? tileName(t) : '')}" placeholder="Optional" spellcheck="false"></label>` +
@@ -632,13 +643,24 @@ function editTile(t) {
   document.body.classList.add('dlg-open');
   setTimeout(() => $('#td-url').focus(), 30);
 }
-function closeDlg() { document.body.classList.remove('dlg-open'); }
+function closeDlg() { document.body.classList.remove('dlg-open'); bmSync(); }
+// A typed address as a full URL, or '' if it isn't one.
+function normUrl(u) {
+  u = (u || '').trim();
+  if (!u) return '';
+  if (/^[a-z]:[\\/]/i.test(u)) return 'file:///' + u.replace(/\\/g, '/');
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+  try {
+    const x = new URL(u);
+    if (/^https?:$/.test(x.protocol) && !x.hostname.includes('.') && x.hostname !== 'localhost') return '';
+    return x.href;
+  } catch { return ''; }
+}
 function saveDlg() {
   let u = $('#td-url').value.trim();
   if (!u) { $('#td-err').textContent = 'Type an address, like youtube.com'; return; }
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
-  try { if (!new URL(u).hostname.includes('.') && !/^https?:\/\/localhost/i.test(u)) throw 0; }
-  catch { $('#td-err').textContent = "That doesn't look like a web address"; return; }
+  u = normUrl(u);
+  if (!u) { $('#td-err').textContent = "That doesn't look like a web address"; return; }
   const name = $('#td-name').value.trim() || hostOf(u).split('.')[0].replace(/^./, (c) => c.toUpperCase());
   savePin(dlg._orig, name, u);
   closeDlg();
@@ -646,10 +668,10 @@ function saveDlg() {
 dlg.addEventListener('click', (e) => {
   const d = e.target.closest('[data-d]')?.dataset.d;
   if (d === 'cancel') closeDlg();
-  if (d === 'save') saveDlg();
+  if (d === 'save') (dlg._save || saveDlg)();
 });
 dlg.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); saveDlg(); }
+  if (e.key === 'Enter') { e.preventDefault(); (dlg._save || saveDlg)(); }
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDlg(); }
 });
 $('#scrim').addEventListener('mousedown', () => {
@@ -663,6 +685,312 @@ function tickClock() {
 }
 tickClock();
 setInterval(() => { if (S.blank) tickClock(); }, 10000);
+
+// ---- bookmarks bar -----------------------------------------------------------
+// Bookmarks and folders in your order. Folders open as menus (subfolders cascade),
+// everything can be dragged to reorder or into folders, and links can be dropped on it.
+const bar = $('#bmbar');
+S.bm = { kids: new Map(), folders: new Map() };
+S.bmMenus = [];
+H.bar = (m) => {
+  const kids = new Map(); const folders = new Map();
+  const put = (p, x) => { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(x); };
+  for (const f of m.folders) { const x = { k: 'f', id: f.id, title: f.title, pos: f.pos, parent: f.parent }; folders.set(f.id, x); }
+  for (const x of folders.values()) put(folders.has(x.parent) ? x.parent : 0, x);
+  for (const b of m.items) put(folders.has(b.parent) ? b.parent : 0, { k: 'b', url: b.url, title: b.title, pos: b.pos, parent: b.parent });
+  for (const l of kids.values()) l.sort((a, b) => a.pos - b.pos);
+  S.bm = { kids, folders };
+  renderBar();
+  refreshBmMenus();
+};
+const bmKids = (p) => S.bm.kids.get(p) || [];
+const keyOf = (x) => (x.k === 'f' ? 'f' + x.id : 'b' + x.url);
+const elKey = (el) => (el.dataset.k === 'f' ? 'f' + el.dataset.f : 'b' + el.dataset.u);
+function bmUrls(id) { const out = []; for (const x of bmKids(id)) x.k === 'b' ? out.push(x.url) : out.push(...bmUrls(x.id)); return out; }
+function findMark(u) { for (const l of S.bm.kids.values()) for (const x of l) if (x.k === 'b' && x.url === u) return x; return null; }
+const bmName = (x) => x.title || (x.k === 'f' ? 'Folder' : hostOf(x.url) || pretty(x.url));
+function bmFav(x) {
+  if (x.k === 'f') return icon('folder');
+  const h = /^https?:/i.test(x.url) ? hostOf(x.url) : '';
+  return h ? `<img data-src="https://${esc(h)}/favicon.ico" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(x.url, x.title)))}">` : letter(x.url, x.title);
+}
+function bmEl(x, row) {
+  const key = x.k === 'f' ? `data-f="${x.id}"` : `data-u="${esc(x.url)}" title="${esc((x.title ? x.title + '\n' : '') + x.url)}"`;
+  return `<button class="bm${x.k === 'f' ? ' fold' : ''}" draggable="true" data-k="${x.k}" ${key}>${bmFav(x)}<span>${esc(bmName(x))}</span>` +
+    `${row && x.k === 'f' ? `<i class="chev">${icon('fwd')}</i>` : ''}</button>`;
+}
+// Favicons load only for what is actually on screen.
+function loadFavs(root) {
+  for (const i of root.querySelectorAll('img[data-src]')) if (i.offsetParent) { i.src = i.dataset.src; i.removeAttribute('data-src'); }
+}
+
+function syncBar() {
+  const mode = S.settings?.bookmarks_bar || 'always';
+  const on = mode === 'always' || (mode === 'start' && S.blank);
+  if (document.body.classList.contains('bm-on') === on) return;
+  document.body.classList.toggle('bm-on', on);
+  if (on) renderBar(); else closeBmMenus();
+}
+function renderBar() {
+  if (!document.body.classList.contains('bm-on')) return;
+  const list = bmKids(0);
+  bar.innerHTML = list.length
+    ? list.map((x) => bmEl(x)).join('') + `<button class="bm more" id="bm-more" title="More bookmarks">${icon('fwd')}</button>`
+    : '<span class="hint">Press <kbd>Ctrl D</kbd> or the star to add pages here, or drag links onto this bar</span>';
+  fitBar();
+}
+// Whatever doesn't fit goes into the » menu at the end.
+function fitBar() {
+  const more = $('#bm-more'); bar._hidden = 0;
+  if (!more || !bar.offsetParent) return;
+  const chips = [...bar.querySelectorAll('.bm:not(.more)')];
+  chips.forEach((c) => c.classList.remove('hide'));
+  more.classList.remove('hide');
+  const limit = bar.clientWidth - 10 - more.offsetWidth - 6;
+  let cut = false;
+  for (const c of chips) {
+    if (!cut && c.offsetLeft + c.offsetWidth > limit) cut = true;
+    if (cut) { c.classList.add('hide'); bar._hidden++; }
+  }
+  more.classList.toggle('hide', !bar._hidden);
+  loadFavs(bar);
+}
+new ResizeObserver(() => fitBar()).observe(bar);
+const overflowList = () => (bar._hidden ? bmKids(0).slice(-bar._hidden) : []);
+
+// The page is a native view above us: menus and dialogs over it swap it for a snapshot.
+function bmOverlay() { if (!S.blank && !S.overlay) openOverlay('bm-open'); }
+function bmSync() {
+  setTimeout(() => {
+    const c = document.body.classList;
+    const busy = S.bmMenus.length || c.contains('ctx-open') || c.contains('dlg-open');
+    if (!busy && S.overlay === 'bm-open') closeOverlay(false);
+  }, 0);
+}
+
+function openBmMenu(parent, anchor, level, list) {
+  closeBmMenus(level, true);
+  const m = document.createElement('div');
+  m.className = 'bm-menu glass';
+  m.dataset.parent = parent; m._level = level; m._anchor = anchor; m._more = !!list;
+  fillBmMenu(m, list || bmKids(parent));
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  let x = level ? r.right + 2 : r.left; let y = level ? r.top - 5 : r.bottom + 4;
+  if (level && x + m.offsetWidth > innerWidth - 6) x = r.left - m.offsetWidth - 2;
+  if (!level && list) x = r.right - m.offsetWidth;
+  x = Math.max(6, Math.min(x, innerWidth - m.offsetWidth - 6));
+  y = Math.max(6, Math.min(y, innerHeight - m.offsetHeight - 6));
+  Object.assign(m.style, { left: x + 'px', top: y + 'px' });
+  S.bmMenus[level] = m;
+  anchor.classList.add('open');
+  loadFavs(m);
+  bmOverlay();
+}
+function fillBmMenu(m, items) {
+  m.innerHTML = items.length ? items.map((x) => bmEl(x, true)).join('') : '<div class="empty">Empty folder</div>';
+}
+function closeBmMenus(from = 0, keepOverlay) {
+  while (S.bmMenus.length > from) { const m = S.bmMenus.pop(); m._anchor?.classList.remove('open'); m.remove(); }
+  if (!keepOverlay) bmSync();
+}
+function refreshBmMenus() {
+  for (let i = 0; i < S.bmMenus.length; i++) {
+    const m = S.bmMenus[i]; const p = +m.dataset.parent;
+    if (p && !S.bm.folders.has(p)) { closeBmMenus(i); return; }
+    fillBmMenu(m, m._more ? overflowList() : bmKids(p));
+    loadFavs(m);
+  }
+}
+
+// Click a bookmark to open it (Ctrl or middle click: new tab); click a folder to open it.
+function bmActivate(b, e, level) {
+  if (b.classList.contains('more')) {
+    if (S.bmMenus[0]?._anchor === b) closeBmMenus(); else openBmMenu(0, b, 0, overflowList());
+  } else if (b.dataset.k === 'f') {
+    if (S.bmMenus[level]?._anchor === b) closeBmMenus(level); else openBmMenu(+b.dataset.f, b, level);
+  } else {
+    send({ t: 'open', url: b.dataset.u, newTab: e.ctrlKey || e.button === 1 });
+    closeBmMenus();
+  }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#bmbar .bm, .bm-menu .bm'); if (!b) return;
+  const m = b.closest('.bm-menu');
+  bmActivate(b, e, m ? m._level + 1 : 0);
+});
+document.addEventListener('auxclick', (e) => {
+  const b = e.target.closest('#bmbar .bm[data-u], .bm-menu .bm[data-u]');
+  if (b && e.button === 1) { e.preventDefault(); send({ t: 'open', url: b.dataset.u, newTab: true }); }
+});
+// Hovering moves between open folders, like a menu bar.
+document.addEventListener('mouseover', (e) => {
+  const chip = e.target.closest('#bmbar .bm.fold');
+  if (chip && S.bmMenus[0] && S.bmMenus[0]._anchor !== chip) { openBmMenu(+chip.dataset.f, chip, 0); return; }
+  const m = e.target.closest('.bm-menu'); if (!m) return;
+  const b = e.target.closest('.bm');
+  clearTimeout(S.bmHover);
+  S.bmHover = setTimeout(() => {
+    if (!m.isConnected || S.drag) return;
+    if (b && b.dataset.k === 'f') { if (S.bmMenus[m._level + 1]?._anchor !== b) openBmMenu(+b.dataset.f, b, m._level + 1); }
+    else if (b) closeBmMenus(m._level + 1, true);
+  }, 220);
+});
+addEventListener('mousedown', (e) => {
+  if (S.bmMenus.length && !e.target.closest('.bm-menu, #ctx, #bmbar .bm')) closeBmMenus();
+}, true);
+
+// ---- right-click menus
+function bmContext(e) {
+  const el = e.target.closest('.bm:not(.more)');
+  const menu = e.target.closest('.bm-menu');
+  const parent = menu ? +menu.dataset.parent : 0;
+  const t = cur(); const page = t && t.url ? t : null;
+  let items;
+  if (el && el.dataset.k === 'b') {
+    const x = findMark(el.dataset.u); if (!x) return;
+    items = [
+      { icon: 'arrow', label: 'Open', run: () => { send({ t: 'open', url: x.url }); closeBmMenus(); } },
+      { icon: 'plus', label: 'Open in new tab', run: () => send({ t: 'open', url: x.url, newTab: true }) },
+      { icon: 'edit', label: 'Edit…', run: () => bmEditMark(x) },
+      { icon: 'external', label: 'Copy link', run: () => navigator.clipboard?.writeText(x.url).then(() => toast('Link copied')) },
+      '-',
+      { icon: 'trash', label: 'Delete', danger: true, run: () => send({ t: 'delBookmark', url: x.url }) },
+    ];
+  } else if (el) {
+    const f = S.bm.folders.get(+el.dataset.f); if (!f) return;
+    const urls = bmUrls(f.id); const n = urls.length;
+    items = [
+      ...(n ? [{ icon: 'plus', label: `Open all ${n > 1 ? n + ' ' : ''}in new tabs`, run: () => {
+        urls.slice(0, 30).forEach((url) => send({ t: 'open', url, newTab: true }));
+        if (n > 30) toast(`Opened the first 30 of ${n}`);
+        closeBmMenus();
+      } }] : []),
+      { icon: 'edit', label: 'Rename…', run: () => bmNameDlg('Rename folder', f.title, (v) => send({ t: 'bmRename', id: f.id, title: v })) },
+      { icon: 'folder', label: 'New folder inside…', run: () => bmNameDlg('New folder', '', (v) => send({ t: 'bmFolder', parent: f.id, title: v })) },
+      ...(page ? [{ icon: 'star', label: 'Add this page here', run: () => send({ t: 'bmAdd', url: page.url, title: page.title, parent: f.id }) }] : []),
+      '-',
+      { icon: 'trash', label: n ? `Delete folder and ${n} bookmark${n > 1 ? 's' : ''}` : 'Delete folder', danger: true, run: () => send({ t: 'bmDelFolder', id: f.id }) },
+    ];
+  } else if (menu && menu._more) {
+    return;
+  } else {
+    items = [
+      ...(page ? [{ icon: 'star', label: 'Add this page', run: () => send({ t: 'bmAdd', url: page.url, title: page.title, parent }) }] : []),
+      { icon: 'plus', label: 'Add bookmark…', run: () => bmEditMark(null, parent) },
+      { icon: 'folder', label: 'New folder…', run: () => bmNameDlg('New folder', '', (v) => send({ t: 'bmFolder', parent, title: v })) },
+      ...(menu ? [] : ['-', { icon: 'eye', label: 'Hide bookmarks bar', run: () => setSetting('bookmarks_bar', 'never') }]),
+    ];
+  }
+  bmOverlay();
+  showMenu(e.clientX, e.clientY, items);
+}
+document.addEventListener('contextmenu', (e) => { if (e.target.closest('#bmbar, .bm-menu')) bmContext(e); });
+
+// ---- add / edit dialogs (the favourite dialog's frame)
+function bmDialog(title, fields, save) {
+  dlg.innerHTML = `<h3>${esc(title)}</h3>` + fields.map((f) =>
+    `<label>${esc(f.label)}<input class="field" data-f="${f.id}" value="${esc(f.value || '')}" placeholder="${esc(f.ph || '')}" spellcheck="false"></label>`).join('') +
+    `<div class="err" id="td-err"></div>` +
+    `<div class="btns"><button class="btn" data-d="cancel">Cancel</button><button class="btn primary" data-d="save">Save</button></div>`;
+  dlg._save = () => {
+    const v = {}; for (const i of dlg.querySelectorAll('input[data-f]')) v[i.dataset.f] = i.value.trim();
+    if (save(v) !== false) closeDlg();
+  };
+  bmOverlay();
+  document.body.classList.add('dlg-open');
+  closeBmMenus(0, true);
+  setTimeout(() => { const i = dlg.querySelector('input'); i.focus(); i.select(); }, 30);
+}
+function bmNameDlg(title, value, done) {
+  bmDialog(title, [{ id: 'name', label: 'Name', value, ph: 'New folder' }], (v) => done(v.name || 'New folder'));
+}
+function bmEditMark(x, parent = 0) {
+  bmDialog(x ? 'Edit bookmark' : 'Add bookmark',
+    [{ id: 'name', label: 'Name', value: x?.title, ph: 'Optional' }, { id: 'url', label: 'Address', value: x?.url, ph: 'youtube.com' }],
+    (v) => {
+      const u = normUrl(v.url);
+      if (!u) { $('#td-err').textContent = "That doesn't look like a web address"; return false; }
+      if (x) send({ t: 'bmEdit', url: x.url, newUrl: u, title: v.name });
+      else send({ t: 'bmAdd', url: u, title: v.name || hostOf(u), parent });
+    });
+}
+
+// ---- drag to reorder, drop into folders, drop links from pages
+const ins = document.createElement('i'); ins.id = 'bm-ins'; document.body.appendChild(ins);
+document.addEventListener('dragstart', (e) => {
+  const b = e.target.closest?.('#bmbar .bm[data-k], .bm-menu .bm[data-k]'); if (!b) return;
+  S.drag = b.dataset.k === 'f' ? { k: 'f', id: +b.dataset.f } : { k: 'b', url: b.dataset.u };
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.dataTransfer.setData('text/plain', S.drag.url || bmName(S.bm.folders.get(S.drag.id) || {}));
+  if (S.drag.url) e.dataTransfer.setData('text/uri-list', S.drag.url);
+});
+document.addEventListener('dragend', () => { S.drag = null; dropClear(); });
+function dropTarget(e) {
+  const zone = e.target.closest?.('#bmbar, .bm-menu'); if (!zone) return null;
+  const vertical = zone.classList.contains('bm-menu');
+  const parent = vertical ? +zone.dataset.parent : 0;
+  const el = e.target.closest('.bm:not(.more)');
+  if (!el) {
+    const last = [...zone.querySelectorAll('.bm:not(.more):not(.hide)')].pop();
+    return { parent, el: last, after: true, vertical };
+  }
+  const r = el.getBoundingClientRect();
+  const f = vertical ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+  if (el.dataset.k === 'f' && f > 0.25 && f < 0.75) return { into: +el.dataset.f, el };
+  return { parent, el, after: f >= 0.5, vertical };
+}
+function dropShow(t) {
+  dropClear();
+  if (t.into) { t.el.classList.add('into'); return; }
+  if (!t.el) return;
+  const r = t.el.getBoundingClientRect();
+  Object.assign(ins.style, t.vertical
+    ? { left: r.left + 6 + 'px', width: r.width - 12 + 'px', top: (t.after ? r.bottom : r.top) - 1 + 'px', height: '2px' }
+    : { left: (t.after ? r.right + 1 : r.left - 3) + 'px', width: '2px', top: r.top + 4 + 'px', height: r.height - 8 + 'px' });
+  ins.style.display = 'block';
+}
+function dropClear() {
+  ins.style.display = 'none';
+  for (const x of document.querySelectorAll('.bm.into')) x.classList.remove('into');
+}
+function dropUrl(dt) {
+  const u = (dt.getData('text/uri-list') || dt.getData('text/plain') || '').split(/\r?\n/).find((l) => l && !l.startsWith('#'))?.trim();
+  return u && /^(https?|file):/i.test(u) ? u : '';
+}
+function dropTitle(dt) {
+  const m = /<a\b[^>]*>([\s\S]*?)<\/a>/i.exec(dt.getData('text/html') || '');
+  return m ? m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+}
+document.addEventListener('dragover', (e) => {
+  const t = dropTarget(e);
+  const self = t && S.drag && S.drag.k === 'f' && t.into === S.drag.id;
+  if (!t || self) { dropClear(); if (!S.drag && e.dataTransfer.types.includes('Files')) e.preventDefault(); return; }
+  e.preventDefault();
+  e.dataTransfer.dropEffect = S.drag ? 'move' : 'copy';
+  dropShow(t);
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault(); // never let a dropped file or link replace the browser's own UI
+  const t = dropTarget(e); dropClear();
+  if (!t) return;
+  let item = S.drag; S.drag = null;
+  const parent = t.into ?? t.parent;
+  if (!item) {
+    const url = dropUrl(e.dataTransfer); if (!url) return;
+    send({ t: 'bmAdd', url, title: dropTitle(e.dataTransfer) || hostOf(url) || url, parent });
+    if (t.into) return;
+    item = { k: 'b', url };
+  }
+  const list = bmKids(parent).filter((x) => keyOf(x) !== keyOf(item));
+  let at = list.length;
+  if (t.el && !t.into) {
+    const i = list.findIndex((x) => keyOf(x) === elKey(t.el));
+    if (i >= 0) at = i + (t.after ? 1 : 0);
+  }
+  list.splice(at, 0, item);
+  send({ t: 'bmOrder', parent, items: list.map((x) => (x.k === 'f' ? { f: x.id } : { u: x.url })) });
+});
 
 // ---- side panel ------------------------------------------------------------
 function togglePanel(p) {
@@ -680,9 +1008,13 @@ function togglePanel(p) {
   if (p === 'history') setTimeout(() => $('#side-q').focus(), 60);
 }
 function closePanel() {
+  if (S.hselecting) endPicking();
   S.panel = null;
   document.body.classList.remove('side-open');
 }
+addEventListener('mousedown', (e) => {
+  if (S.panel && !e.target.closest('#side, #menu, #ctx, #tile-dlg, #scrim, #settings, .bm-menu, #shield-pop, #sugg')) closePanel();
+}, true);
 function movePill(seg) {
   const on = seg.querySelector('button.on'); const pill = seg.querySelector('.seg-pill');
   if (!on || !pill) return;
@@ -719,19 +1051,22 @@ function renderList(kind, items) {
       if (l !== day) { day = l; html += `<div class="day">${esc(l)}</div>`; }
     }
     const time = kind === 'history' ? new Date(i.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    html += `<div class="row" data-url="${esc(i.url)}" title="${esc(i.url)}"><span class="fav">${letter(i.url, i.title)}</span>` +
+    const picked = kind === 'history' && S.hsel.has(i.url);
+    html += `<div class="row${picked ? ' picked' : ''}" data-url="${esc(i.url)}" title="${esc(i.url)}"><span class="fav">${letter(i.url, i.title)}<i class="tick">${icon('check')}</i></span>` +
       `<div class="txt"><span class="t">${esc(i.title || pretty(i.url))}</span><span class="u">${esc(hostOf(i.url))}</span></div>` +
       `<span class="end">${time}</span><button class="icon sm del" title="Remove">${icon('x')}</button></div>`;
   }
-  if (kind === 'history') {
-    html += `<div class="btns" style="padding:14px 4px"><button class="btn danger" data-act="clearHistory">${icon('trash')}Clear all history</button></div>`;
-  }
   body.innerHTML = html;
+  if (kind === 'history') { S.hitems = items; renderHistTools(); }
 }
 $('#side-body').addEventListener('click', (e) => {
   const act = e.target.closest('[data-act]');
   if (act) { runAction(act); return; }
   const row = e.target.closest('.row[data-url]'); if (!row) return;
+  // Selecting: click (or click the icon) to pick, Shift+click for a range.
+  if (S.panel === 'history' && !e.target.closest('.del') && (S.hselecting || e.target.closest('.fav'))) {
+    pickRow(row, e.shiftKey); return;
+  }
   if (e.target.closest('.del')) {
     send(S.panel === 'history' ? { t: 'delHistory', url: row.dataset.url, q: $('#side-q').value } : { t: 'delBookmark', url: row.dataset.url });
     return;
@@ -741,6 +1076,69 @@ $('#side-body').addEventListener('click', (e) => {
 $('#side-body').addEventListener('auxclick', (e) => {
   const row = e.target.closest('.row[data-url]');
   if (row && e.button === 1) send({ t: 'open', url: row.dataset.url, newTab: true });
+});
+
+// ---- history: select & delete, clear a time range, auto-delete
+S.hsel = new Set(); S.hselecting = false; S.hitems = [];
+const RANGES = [['Last hour', 3600], ['Last 24 hours', 86400], ['Last 7 days', 7 * 86400], ['Last 4 weeks', 28 * 86400], ['All time', 0]];
+const KEEP = [[0, 'Forever'], [1, '1 day'], [7, '1 week'], [30, '1 month'], [90, '3 months'], [365, '1 year']];
+const keepLabel = (d) => (KEEP.find(([v]) => v === d)?.[1] || `${d} days`);
+function renderHistTools() {
+  const n = S.hsel.size; const el = $('#hist-tools');
+  el.innerHTML = S.hselecting
+    ? `<span class="cnt">${n ? `${n} selected` : 'Pick pages to delete'}</span>` +
+      `<button class="btn sm" data-h="all">${n && n === S.hitems.length ? 'None' : 'All'}</button>` +
+      `<button class="btn sm danger" data-h="del" ${n ? '' : 'disabled'}>${icon('trash')}Delete</button>` +
+      `<button class="btn sm" data-h="done">Done</button>`
+    : `<button class="btn sm" data-h="select">${icon('check')}Select</button>` +
+      `<button class="btn sm" data-h="clear">${icon('trash')}Clear…</button>` +
+      `<button class="btn sm ghost" data-h="auto" title="Delete old history automatically">${icon('clock')}Auto-delete: ${esc(keepLabel(S.settings?.history_days | 0))}</button>`;
+}
+function pickRow(row, range) {
+  const u = row.dataset.url;
+  if (!S.hselecting) S.hselecting = true;
+  if (range && S.hlast) {
+    const urls = S.hitems.map((i) => i.url); const a = urls.indexOf(S.hlast); const b = urls.indexOf(u);
+    if (a >= 0 && b >= 0) for (const x of urls.slice(Math.min(a, b), Math.max(a, b) + 1)) S.hsel.add(x);
+  } else if (S.hsel.has(u)) S.hsel.delete(u); else S.hsel.add(u);
+  S.hlast = u;
+  for (const r of document.querySelectorAll('#side-body .row[data-url]')) r.classList.toggle('picked', S.hsel.has(r.dataset.url));
+  document.body.classList.toggle('hist-picking', S.hselecting);
+  renderHistTools();
+}
+function endPicking() {
+  S.hselecting = false; S.hsel.clear(); S.hlast = null;
+  document.body.classList.remove('hist-picking');
+  for (const r of document.querySelectorAll('#side-body .row.picked')) r.classList.remove('picked');
+  renderHistTools();
+}
+$('#hist-tools').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-h]'); if (!b) return;
+  const h = b.dataset.h;
+  if (h === 'select') { S.hselecting = true; document.body.classList.add('hist-picking'); renderHistTools(); }
+  else if (h === 'done') endPicking();
+  else if (h === 'all') {
+    if (S.hsel.size === S.hitems.length) S.hsel.clear(); else for (const i of S.hitems) S.hsel.add(i.url);
+    for (const r of document.querySelectorAll('#side-body .row[data-url]')) r.classList.toggle('picked', S.hsel.has(r.dataset.url));
+    renderHistTools();
+  } else if (h === 'del') {
+    send({ t: 'delHistoryMany', urls: [...S.hsel], q: $('#side-q').value });
+    endPicking();
+  } else if (h === 'clear') {
+    const r = b.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4, RANGES.map(([label, secs]) => ({
+      icon: secs ? 'clock' : 'trash', label: `Delete ${label.toLowerCase()}`, danger: !secs,
+      run: () => send({ t: 'clearHistoryRange', secs, q: $('#side-q').value }),
+    })));
+  } else if (h === 'auto') {
+    const r = b.getBoundingClientRect();
+    const d = S.settings.history_days | 0;
+    showMenu(r.left, r.bottom + 4, [
+      ...KEEP.map(([v, l]) => ({ icon: v === d ? 'check' : 'clock', label: v ? `Keep ${l}` : 'Keep forever', run: () => { setSetting('history_days', v); renderHistTools(); } })),
+      '-',
+      { icon: 'edit', label: 'Custom…', run: () => openSettings('privacy') },
+    ]);
+  }
 });
 
 // Destructive buttons ask for a second click instead of a dialog.
@@ -779,6 +1177,7 @@ const SECTIONS = [
     ['Layout', [
       { k: 'radius', label: 'Roundness', type: 'range', min: 0, max: 24, unit: 'px' },
       { k: 'compact', label: 'Compact layout', desc: 'Tabs and address bar share one row', type: 'toggle' },
+      { k: 'bookmarks_bar', label: 'Bookmarks bar', desc: 'Ctrl+Shift+B shows or hides it', type: 'select', opts: [['always', 'Always'], ['start', 'On the start page'], ['never', 'Hidden']] },
       { k: 'rounded_pages', label: 'Rounded page corners', type: 'toggle' },
       { k: 'reduce_motion', label: 'Reduce motion', desc: 'Turn off animations', type: 'toggle' },
     ]],
@@ -798,6 +1197,7 @@ const SECTIONS = [
   { id: 'privacy', icon: 'shield', title: 'Privacy & trackers', groups: [
     ['Blocking', [F.adblock, { type: 'allow' }, F.updateLists]],
     ['Tracking', [F.tracking]],
+    ['History', [{ type: 'histKeep', label: 'Delete history automatically', desc: 'Pages older than this are removed, checked every hour' }]],
     ['Clear browsing data', [{ type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] }]],
   ] },
   { id: 'data', icon: 'database', title: 'Your data', groups: [
@@ -907,7 +1307,7 @@ function renderTrackers() {
   body.innerHTML = h; body.scrollTop = y;
 }
 const KEYS = [['New tab', 'Ctrl T'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
-  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks', 'Ctrl Shift B'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
+  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
 function field(it, s) {
   const label = `<div class="lbl"><b>${esc(it.label)}</b>${it.desc ? `<small>${esc(val(it.desc))}</small>` : ''}</div>`;
   switch (it.type) {
@@ -927,6 +1327,13 @@ function field(it, s) {
     case 'select':
       return `<div class="set">${label}<select class="field" style="width:auto;min-width:150px" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
         it.opts.map(([v, l]) => `<option value="${v}" ${String(s[it.k]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('') + '</select></div>';
+    case 'histKeep': {
+      const d = s.history_days | 0; const custom = S.histCustom || !KEEP.some(([v]) => v === d);
+      return `<div class="set">${label}<div class="hk"><select class="field" data-hk style="width:auto;min-width:130px">` +
+        KEEP.map(([v, l]) => `<option value="${v}" ${!custom && v === d ? 'selected' : ''}>${v ? 'After ' + l : 'Never'}</option>`).join('') +
+        `<option value="c" ${custom ? 'selected' : ''}>Custom…</option></select>` +
+        (custom ? `<input class="field" type="number" data-hkd min="1" max="3650" value="${d || 14}"><span class="u">days</span>` : '') + '</div></div>';
+    }
     case 'text':
       return `<div class="set col">${label}<input class="field" data-k="${it.k}" value="${esc(s[it.k])}" placeholder="${esc(it.placeholder || '')}" spellcheck="false"></div>`;
     case 'code':
@@ -984,7 +1391,7 @@ function field(it, s) {
         `<div class="hint">Passwords and signed-in sessions can't be copied: Chrome encrypts them so only Chrome can read them. Sign in once in Lurt and it remembers you.</div>`;
     }
     case 'about':
-      return `<div class="about"><span class="logo">${icon('sparkle')}</span><div><b>Lurt 0.1.0</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
+      return `<div class="about"><span class="logo">${LOGO}</span><div><b>Lurt 0.1.0</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
         `<div class="btns"><button class="btn" data-open="https://github.com/ladroxd/Lurt">${icon('external')}Project page</button><button class="btn" data-open="https://github.com/ladroxd/Lurt/releases">${icon('download')}Releases</button></div>`;
     case 'keys':
       return `<div class="keys">` + KEYS.map(([a, k]) => `<span>${esc(a)}</span><kbd>${esc(k)}</kbd>`).join('') + `</div>`;
@@ -1016,6 +1423,15 @@ function bindSettings(el, active, ownActions) {
       return;
     }
     if (e.target.dataset.a === 'site') { send({ t: 'shield' }); return; }
+    if (e.target.hasAttribute('data-hk')) {
+      S.histCustom = e.target.value === 'c';
+      setSetting('history_days', S.histCustom ? (S.settings.history_days || 14) : +e.target.value, { rerender: true });
+      return;
+    }
+    if (e.target.hasAttribute('data-hkd')) {
+      setSetting('history_days', Math.max(1, Math.min(3650, Math.round(+e.target.value) || 1)));
+      return;
+    }
     const t = e.target; const k = t.dataset.k; if (!k) return;
     if (t.type === 'checkbox') setSetting(k, t.checked, { rerender: k === 'adblock' });
     else if (t.tagName === 'SELECT') setSetting(k, t.hasAttribute('data-num') ? +t.value : t.value);
@@ -1083,7 +1499,9 @@ addEventListener('keydown', (e) => {
   if (FORWARD.has(c)) { e.preventDefault(); send({ t: 'key', k: c }); return; }
   if (c === 'ctrl+l' || c === 'alt+d' || c === 'f6') { e.preventDefault(); addr.focus(); addr.select(); return; }
   if (c === 'ctrl+h') { e.preventDefault(); togglePanel('history'); return; }
-  if (c === 'ctrl+shift+b') { e.preventDefault(); togglePanel('bookmarks'); return; }
+  if (c === 'ctrl+shift+b') { e.preventDefault(); send({ t: 'key', k: c }); return; }
+  if (c === 'ctrl+shift+o') { e.preventDefault(); togglePanel('bookmarks'); return; }
+  if (c === 'escape' && S.bmMenus.length && !document.body.classList.contains('ctx-open')) { closeBmMenus(); return; }
   if (c === 'ctrl+comma') { e.preventDefault(); settingsOpen() ? closeSettings() : openSettings(); return; }
   if (c === 'escape' && document.body.classList.contains('ctx-open')) { hideMenu(); return; }
   if (c === 'escape' && settingsOpen() && !document.body.classList.contains('dlg-open')) { closeSettings(); return; }

@@ -34,7 +34,7 @@ use wry::{
 
 use crate::{
     blocker::Shield,
-    store::{Session, SessionTab, Settings, Store},
+    store::{Session, SessionTab, Settings, Slot, Store},
     tabs::{Tab, ViewOpts},
 };
 
@@ -92,6 +92,8 @@ struct App {
     overlay: bool,
     /// When to re-present the window so the Windows 10 blur covers its new size.
     glass_fix_at: Option<Instant>,
+    /// When old history was last auto-deleted (checked hourly).
+    pruned_at: Option<Instant>,
     ui_ready: bool,
     started: Instant,
     quit: bool,
@@ -137,7 +139,9 @@ fn main() {
         .with_title("Lurt")
         .with_decorations(false)
         .with_transparent(true)
-        .with_undecorated_shadow(true)
+        // No shadow: on Windows 10 it keeps an invisible frame around the window that
+        // the blur paints over, showing as a see-through band on three sides.
+        .with_undecorated_shadow(false)
         .with_visible(false)
         .with_inner_size(WinSize::new(w, h))
         .with_min_inner_size(WinSize::new(520.0, 380.0));
@@ -145,6 +149,7 @@ fn main() {
         builder = builder.with_position(tao::dpi::LogicalPosition::new(x.max(0.0), y.max(0.0)));
     }
     let window = builder.build(&event_loop).expect("window");
+    glass::set_icon(&window);
     mark("window created");
     let backdrop = glass::apply(&window, &settings.backdrop, is_dark(&settings.theme));
     glass::set_window_opacity(&window, settings.window_opacity);
@@ -229,6 +234,7 @@ fn main() {
         fullscreen: false,
         overlay: false,
         glass_fix_at: None,
+        pruned_at: None,
         ui_ready: false,
         started: Instant::now(),
         quit: false,
@@ -381,6 +387,7 @@ impl App {
         });
         self.layout_tabs();
     }
+
 
     fn layout_tabs(&self) {
         let vp = self.viewport();
@@ -661,6 +668,10 @@ impl App {
             splash::dismiss();
             self.ui_ready = true;
         }
+        if self.pruned_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3600)) {
+            self.pruned_at = Some(Instant::now());
+            self.store.prune_history(self.settings.history_days);
+        }
         let mins = self.settings.sleep_minutes;
         if mins > 0 {
             let limit = Duration::from_secs(u64::from(mins) * 60);
@@ -693,8 +704,19 @@ impl App {
         }
         let on = self.store.toggle_bookmark(&t.url, &t.title);
         self.toast(if on { "Bookmarked" } else { "Bookmark removed" });
-        self.push_state();
+        self.bookmarks_changed();
+    }
+
+    /// The whole bookmarks bar, as flat folder and bookmark lists.
+    fn send_bar(&self) {
+        let (folders, items) = self.store.bar();
+        self.send(json!({ "t": "bar", "folders": folders, "items": items }));
+    }
+
+    fn bookmarks_changed(&self) {
+        self.send_bar();
         self.send_list("bookmarks", "");
+        self.push_state();
     }
 
     /// What the shield blocked on the active page, grouped by domain, busiest first.
@@ -789,6 +811,12 @@ impl App {
         if old.rounded_pages != s.rounded_pages || old.radius != s.radius {
             self.layout_tabs();
         }
+        if old.history_days != s.history_days && s.history_days > 0 {
+            let n = self.store.prune_history(s.history_days);
+            if n > 0 {
+                self.toast(&format!("Deleted {n} old history entries"));
+            }
+        }
         self.store.save_settings(&self.settings);
         self.send_settings();
         self.push_state();
@@ -838,7 +866,13 @@ impl App {
             "ctrl+shift+tab" => self.cycle(-1),
             "ctrl+d" => self.toggle_star(),
             "ctrl+h" => self.send(json!({ "t": "panel", "p": "history" })),
-            "ctrl+shift+b" => self.send(json!({ "t": "panel", "p": "bookmarks" })),
+            // Like Chrome: Ctrl+Shift+B shows or hides the bookmarks bar.
+            "ctrl+shift+b" => {
+                let mut s = self.settings.clone();
+                s.bookmarks_bar = if s.bookmarks_bar == "never" { "always" } else { "never" }.into();
+                self.apply_settings(s);
+            }
+            "ctrl+shift+o" => self.send(json!({ "t": "panel", "p": "bookmarks" })),
             "ctrl+comma" => self.send(json!({ "t": "panel", "p": "settings" })),
             "ctrl+shift+t" => {
                 if let Some(url) = self.closed.pop() {
@@ -972,7 +1006,7 @@ impl App {
                 };
                 self.send(json!({ "t": "imported", "text": text }));
                 self.send_list("top", "");
-                self.send_list("bookmarks", "");
+                self.bookmarks_changed();
             }
         }
     }
@@ -985,6 +1019,7 @@ impl App {
                 let k = m["k"].as_str().unwrap_or("").to_string();
                 self.shortcut(&k);
             }
+            "down" if id == self.active => self.send(json!({ "t": "pageDown" })),
             "fav" => {
                 let u = m["u"].as_str().unwrap_or("");
                 if u.len() < 2048 && (u.starts_with("https://") || u.starts_with("http://")) {
@@ -1014,6 +1049,7 @@ impl App {
                 self.send_settings();
                 self.send(json!({ "t": "mods", "css": self.store.ui_mods() }));
                 self.push_state();
+                self.send_bar();
                 mark("UI ready (first paint done)");
                 // Safety net: never leave the skeleton up if the "painted" signal is lost.
                 let p = self.proxy.clone();
@@ -1150,8 +1186,65 @@ impl App {
             }
             "delBookmark" => {
                 self.store.remove_bookmark(&s("url"));
-                self.send_list("bookmarks", "");
-                self.push_state();
+                self.bookmarks_changed();
+            }
+            "bmAdd" => {
+                let url = s("url");
+                if !url.is_empty() {
+                    self.store.add_bookmark(&url, &s("title"), m["parent"].as_i64().unwrap_or(0));
+                    self.bookmarks_changed();
+                }
+            }
+            "bmFolder" => {
+                let title = Some(s("title")).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "New folder".into());
+                self.store.add_folder(title.trim(), m["parent"].as_i64().unwrap_or(0));
+                self.bookmarks_changed();
+            }
+            "bmRename" => {
+                self.store.rename_folder(m["id"].as_i64().unwrap_or(-1), s("title").trim());
+                self.bookmarks_changed();
+            }
+            "bmDelFolder" => {
+                self.store.delete_folder(m["id"].as_i64().unwrap_or(-1));
+                self.bookmarks_changed();
+            }
+            "bmEdit" => {
+                let new_url = s("newUrl");
+                if !new_url.is_empty() {
+                    self.store.edit_bookmark(&s("url"), &new_url, s("title").trim());
+                    self.bookmarks_changed();
+                }
+            }
+            "bmOrder" => {
+                let slots: Vec<Slot> = m["items"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| match (v["f"].as_i64(), v["u"].as_str()) {
+                                (Some(id), _) => Some(Slot::Folder(id)),
+                                (_, Some(u)) => Some(Slot::Mark(u.to_string())),
+                                _ => None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.store.reorder(m["parent"].as_i64().unwrap_or(0), &slots);
+                self.bookmarks_changed();
+            }
+            "delHistoryMany" => {
+                let urls: Vec<String> = m["urls"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let n = self.store.delete_history_many(&urls);
+                self.send_list("history", &s("q"));
+                self.toast(&format!("Deleted {n} {}", if n == 1 { "page" } else { "pages" }));
+            }
+            "clearHistoryRange" => {
+                let n = self.store.clear_history_since(m["secs"].as_i64().unwrap_or(-1).max(0));
+                self.send_list("history", &s("q"));
+                self.send_list("top", "");
+                self.toast(&format!("Deleted {n} history {}", if n == 1 { "entry" } else { "entries" }));
             }
             "clearHistory" => {
                 self.store.clear_history();

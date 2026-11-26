@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/lurt.png" width="96" alt="Lurt logo"></p>
+
 # Lurt
 
 A light, fast browser for Windows, written in Rust, with a liquid-glass interface.
@@ -38,7 +40,8 @@ Passwords and signed-in sessions can't be imported, because Chromium encrypts th
 | Ctrl+Tab, Ctrl+1…9 | Switch tabs |
 | Ctrl+L, Alt+D, F6 | Address bar (Alt+Enter opens in a new tab) |
 | Ctrl+D | Bookmark page |
-| Ctrl+H / Ctrl+Shift+B / Ctrl+, | History / Bookmarks / Settings |
+| Ctrl+H / Ctrl+Shift+O / Ctrl+, | History / All bookmarks / Settings |
+| Ctrl+Shift+B | Show or hide the bookmarks bar |
 | F5, Alt+←/→ | Reload, back/forward |
 
 ## Mods

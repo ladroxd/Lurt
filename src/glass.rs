@@ -12,6 +12,29 @@ use windows::Win32::{
     },
 };
 
+/// The Lurt icon from the exe's resources (id 1), for the title bar, taskbar and Alt+Tab.
+pub fn set_icon(window: &Window) {
+    use windows::Win32::{
+        Foundation::{HINSTANCE, LPARAM, WPARAM},
+        System::LibraryLoader::GetModuleHandleW,
+        UI::WindowsAndMessaging::{
+            GetSystemMetrics, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
+            SM_CXSMICON, SendMessageW, WM_SETICON,
+        },
+    };
+    let hwnd = HWND(window.hwnd() as _);
+    unsafe {
+        let Ok(module) = GetModuleHandleW(None) else { return };
+        for (kind, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+            let size = GetSystemMetrics(metric);
+            let id = windows::core::PCWSTR(1 as _);
+            if let Ok(icon) = LoadImageW(Some(HINSTANCE(module.0)), id, IMAGE_ICON, size, size, LR_DEFAULTCOLOR) {
+                SendMessageW(hwnd, WM_SETICON, Some(WPARAM(kind as usize)), Some(LPARAM(icon.0 as isize)));
+            }
+        }
+    }
+}
+
 /// Windows 10 keeps the blur at the size the window had when it was last shown, so
 /// after a maximize or resize part of the window loses its glass (a visible rectangle).
 /// Re-presenting the window makes the compositor pick up the new size.

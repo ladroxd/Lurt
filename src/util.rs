@@ -14,11 +14,28 @@ pub fn search_url(engine: &str, q: &str) -> String {
     template.replace("%s", &enc)
 }
 
+/// A Windows path to a file (`C:\dir\file.pdf`, `\\server\share\x.png`, optionally in
+/// quotes as Explorer's "Copy as path" gives it) as a `file:///` URL.
+pub fn local_file_url(input: &str) -> Option<String> {
+    let s = input.trim().trim_matches('"').trim();
+    let b = s.as_bytes();
+    let drive = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/');
+    let unc = s.starts_with(r"\\");
+    if !drive && !unc {
+        return None;
+    }
+    url::Url::from_file_path(s.replace('/', r"\")).ok().map(|u| u.to_string())
+}
+
 /// Decide whether what the user typed is an address or a search.
 pub fn resolve_input(input: &str, engine: &str) -> String {
     let s = input.trim();
     if s.is_empty() {
         return String::new();
+    }
+    // Local files: images, PDFs and HTML open right in the browser.
+    if let Some(u) = local_file_url(s) {
+        return u;
     }
     let lower = s.to_ascii_lowercase();
     for scheme in ["http://", "https://", "file://", "about:", "edge://", "view-source:", "data:"] {
@@ -77,5 +94,10 @@ mod tests {
         assert_eq!(resolve_input("hello", "duckduckgo"), "https://duckduckgo.com/?q=hello");
         assert_eq!(resolve_input("https://a.b/c d", "google"), "https://a.b/c d");
         assert_eq!(resolve_input("v1.2", "google"), "https://www.google.com/search?q=v1.2");
+        assert_eq!(resolve_input(r"C:\Users\me\My Docs\a.pdf", "google"), "file:///C:/Users/me/My%20Docs/a.pdf");
+        assert_eq!(resolve_input(r#""D:\pics\cat.png""#, "google"), "file:///D:/pics/cat.png");
+        assert_eq!(resolve_input("C:/site/index.html", "google"), "file:///C:/site/index.html");
+        assert_eq!(resolve_input(r"\\nas\share\x.jpg", "google"), "file://nas/share/x.jpg");
+        assert_eq!(resolve_input("file:///C:/a.html", "google"), "file:///C:/a.html");
     }
 }

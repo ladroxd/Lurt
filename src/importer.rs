@@ -25,6 +25,8 @@ pub struct Item {
     pub title: String,
     pub time: i64,
     pub visits: i64,
+    /// Bookmarks: the folders it sits in, outermost first. Empty = on the bar itself.
+    pub folder: Vec<String>,
 }
 
 #[derive(Default)]
@@ -136,8 +138,10 @@ pub fn read_profile(id: &str, scratch: &Path) -> Result<Batch, String> {
     Ok(batch)
 }
 
+/// Chrome's `Bookmarks` file. The bookmarks bar lands on Lurt's bar as-is; "Other
+/// bookmarks" and "Mobile bookmarks" become folders on the bar.
 fn chromium_bookmarks(text: &str, out: &mut Vec<Item>) {
-    fn walk(node: &Value, out: &mut Vec<Item>) {
+    fn walk(node: &Value, path: &mut Vec<String>, out: &mut Vec<Item>) {
         match node["type"].as_str() {
             Some("url") => {
                 let url = node["url"].as_str().unwrap_or("");
@@ -148,13 +152,21 @@ fn chromium_bookmarks(text: &str, out: &mut Vec<Item>) {
                         title: node["name"].as_str().unwrap_or("").into(),
                         time: webkit_to_unix(added),
                         visits: 0,
+                        folder: path.clone(),
                     });
                 }
             }
             _ => {
                 if let Some(children) = node["children"].as_array() {
                     for c in children {
-                        walk(c, out);
+                        let sub = c["type"].as_str() == Some("folder");
+                        if sub {
+                            path.push(c["name"].as_str().unwrap_or("Folder").to_string());
+                        }
+                        walk(c, path, out);
+                        if sub {
+                            path.pop();
+                        }
                     }
                 }
             }
@@ -162,8 +174,14 @@ fn chromium_bookmarks(text: &str, out: &mut Vec<Item>) {
     }
     if let Ok(v) = serde_json::from_str::<Value>(text) {
         if let Some(roots) = v["roots"].as_object() {
-            for root in roots.values() {
-                walk(root, out);
+            for (key, root) in roots {
+                let mut path = match key.as_str() {
+                    "bookmark_bar" => Vec::new(),
+                    "other" => vec!["Other bookmarks".to_string()],
+                    "synced" => vec!["Mobile bookmarks".to_string()],
+                    _ => continue,
+                };
+                walk(root, &mut path, out);
             }
         }
     }
@@ -182,6 +200,7 @@ fn chromium_history(db: &Path, out: &mut Vec<Item>) -> Result<(), String> {
                 title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 visits: r.get::<_, Option<i64>>(2)?.unwrap_or(1).max(1),
                 time: webkit_to_unix(r.get::<_, Option<i64>>(3)?.unwrap_or(0)),
+                folder: Vec::new(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -227,6 +246,7 @@ fn takeout_history(list: &[Value], out: &mut Vec<Item>) {
             title: String::new(),
             time: 0,
             visits: 0,
+            folder: Vec::new(),
         });
         e.visits += 1;
         if time >= e.time {
@@ -239,22 +259,51 @@ fn takeout_history(list: &[Value], out: &mut Vec<Item>) {
     out.extend(by_url.into_values());
 }
 
-/// Minimal parser for `<A HREF="..." ADD_DATE="...">Title</A>` entries.
+/// Minimal parser for bookmark exports: `<H3>Folder</H3><DL>…</DL>` folders holding
+/// `<A HREF="..." ADD_DATE="...">Title</A>` entries. The toolbar folder (the one marked
+/// `PERSONAL_TOOLBAR_FOLDER`) maps to Lurt's bar itself.
 fn netscape_bookmarks(html: &str, out: &mut Vec<Item>) {
     let lower = html.to_ascii_lowercase();
+    // One entry per open <DL>: the folder name it adds to the path, if any.
+    let mut stack: Vec<Option<String>> = Vec::new();
+    let mut pending: Option<Option<String>> = None;
     let mut pos = 0;
-    while let Some(i) = lower[pos..].find("<a ") {
-        let start = pos + i;
+    loop {
+        let next = ["<a ", "<h3", "<dl", "</dl"]
+            .iter()
+            .filter_map(|t| lower[pos..].find(t).map(|i| (pos + i, *t)))
+            .min_by_key(|(i, _)| *i);
+        let Some((start, kind)) = next else { break };
         let Some(tag_end) = lower[start..].find('>').map(|j| start + j) else { break };
-        let tag = &html[start..tag_end];
-        let close = lower[tag_end..].find("</a>").map_or(html.len(), |j| tag_end + j);
-        let title = decode_entities(html[tag_end + 1..close].trim());
-        let url = attr(tag, "href").map(|u| decode_entities(&u)).unwrap_or_default();
-        if keep(&url) {
-            let time = attr(tag, "add_date").and_then(|d| d.parse().ok()).unwrap_or(0);
-            out.push(Item { url, title, time, visits: 0 });
+        match kind {
+            "<dl" => {
+                stack.push(pending.take().flatten());
+                pos = tag_end + 1;
+            }
+            "</dl" => {
+                stack.pop();
+                pos = tag_end + 1;
+            }
+            "<h3" => {
+                let close = lower[tag_end..].find("</h3>").map_or(html.len(), |j| tag_end + j);
+                let tag = &lower[start..tag_end];
+                let name = decode_entities(html[tag_end + 1..close].trim());
+                pending = Some(if tag.contains("personal_toolbar_folder") { None } else { Some(name) });
+                pos = close.min(html.len());
+            }
+            _ => {
+                let tag = &html[start..tag_end];
+                let close = lower[tag_end..].find("</a>").map_or(html.len(), |j| tag_end + j);
+                let title = decode_entities(html[tag_end + 1..close].trim());
+                let url = attr(tag, "href").map(|u| decode_entities(&u)).unwrap_or_default();
+                if keep(&url) {
+                    let time = attr(tag, "add_date").and_then(|d| d.parse().ok()).unwrap_or(0);
+                    let folder = stack.iter().flatten().cloned().collect();
+                    out.push(Item { url, title, time, visits: 0, folder });
+                }
+                pos = close.min(html.len());
+            }
         }
-        pos = close.min(html.len());
         if pos >= html.len() {
             break;
         }
@@ -286,12 +335,41 @@ pub fn save(db_path: &Path, batch: &Batch) -> Result<(usize, usize), String> {
     let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut added = 0;
+    crate::store::migrate_bookmarks(&tx);
     {
-        let mut stmt = tx
-            .prepare("INSERT OR IGNORE INTO bookmarks(url, title, created) VALUES(?1, ?2, ?3)")
-            .map_err(|e| e.to_string())?;
+        // Folders are matched by name, so importing twice doesn't duplicate them.
+        let mut folders: std::collections::HashMap<Vec<String>, i64> = Default::default();
         for b in &batch.bookmarks {
-            added += stmt.execute(params![b.url, b.title, b.time]).unwrap_or(0);
+            let mut parent = 0;
+            for depth in 1..=b.folder.len() {
+                let key = b.folder[..depth].to_vec();
+                parent = *folders
+                    .entry(key)
+                    .or_insert_with(|| crate::store::folder_in(&tx, parent, &b.folder[depth - 1]));
+            }
+            let exists = tx
+                .query_row("SELECT parent FROM bookmarks WHERE url = ?1", params![b.url], |r| r.get::<_, i64>(0))
+                .ok();
+            match exists {
+                // Already saved: only file it into its folder if it's still loose on the bar.
+                Some(0) if parent != 0 => {
+                    let pos = crate::store::next_pos(&tx, parent);
+                    let _ = tx.execute(
+                        "UPDATE bookmarks SET parent = ?2, pos = ?3 WHERE url = ?1",
+                        params![b.url, parent, pos],
+                    );
+                }
+                Some(_) => {}
+                None => {
+                    let pos = crate::store::next_pos(&tx, parent);
+                    added += tx
+                        .execute(
+                            "INSERT OR IGNORE INTO bookmarks(url, title, created, parent, pos) VALUES(?1, ?2, ?3, ?4, ?5)",
+                            params![b.url, b.title, b.time, parent, pos],
+                        )
+                        .unwrap_or(0);
+                }
+            }
         }
         let mut stmt = tx
             .prepare(
@@ -351,6 +429,29 @@ mod tests {
         let b = read_file("Bookmarks", json).unwrap();
         assert_eq!(b.bookmarks.len(), 2);
         assert!(b.bookmarks[0].time > 1_600_000_000);
+        assert!(b.bookmarks[0].folder.is_empty());
+    }
+
+    #[test]
+    fn keeps_folders() {
+        let json = r#"{"roots":{"bookmark_bar":{"type":"folder","children":[
+            {"type":"folder","name":"Dev","children":[{"type":"folder","name":"Rust","children":[
+              {"type":"url","name":"R","url":"https://rust-lang.org/"}]}]}]},
+            "other":{"type":"folder","children":[{"type":"url","name":"O","url":"https://o.com/"}]}}}"#;
+        let b = read_file("Bookmarks", json).unwrap();
+        let f: Vec<_> = b.bookmarks.iter().map(|i| i.folder.join("/")).collect();
+        assert!(f.contains(&"Dev/Rust".to_string()) && f.contains(&"Other bookmarks".to_string()));
+
+        let html = r#"<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>
+          <DT><H3 PERSONAL_TOOLBAR_FOLDER="true">Bookmarks bar</H3><DL><p>
+            <DT><A HREF="https://a.com/">A</A>
+            <DT><H3>News</H3><DL><p><DT><A HREF="https://n.com/">N</A></DL><p>
+          </DL><p>
+          <DT><A HREF="https://loose.com/">L</A>
+        </DL>"#;
+        let b = read_file("bookmarks.html", html).unwrap();
+        let f: Vec<_> = b.bookmarks.iter().map(|i| (i.url.as_str(), i.folder.join("/"))).collect();
+        assert_eq!(f, [("https://a.com/", String::new()), ("https://n.com/", "News".into()), ("https://loose.com/", String::new())]);
     }
 }
 
