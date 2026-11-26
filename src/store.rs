@@ -17,8 +17,10 @@ pub struct Settings {
     pub theme: String,
     /// "blur" | "acrylic" | "mica" | "none"
     pub backdrop: String,
-    /// How strongly the glass is tinted, 0..=100.
+    /// Opacity of the browser's background over the glass, 0 (clear) ..= 100 (solid).
     pub tint: u8,
+    /// Opacity of the whole window, pages included, 10..=100.
+    pub window_opacity: u8,
     pub accent: String,
     /// Corner radius of glass surfaces, in px.
     pub radius: u8,
@@ -51,7 +53,8 @@ impl Default for Settings {
         Self {
             theme: "system".into(),
             backdrop: "blur".into(),
-            tint: 55,
+            tint: 60,
+            window_opacity: 100,
             accent: "#8ab4ff".into(),
             radius: 14,
             compact: false,

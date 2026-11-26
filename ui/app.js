@@ -120,7 +120,7 @@ function applyLook() {
   const root = document.documentElement;
   root.style.setProperty('--accent', s.accent);
   root.style.setProperty('--r', s.radius + 'px');
-  root.style.setProperty('--tint', S.backdrop === 'none' ? 1 : (0.12 + (s.tint / 100) * 0.86).toFixed(3));
+  root.style.setProperty('--tint', S.backdrop === 'none' ? 1 : (s.tint / 100).toFixed(3));
   root.dataset.mode = s.theme === 'system' ? (mq.matches ? 'dark' : 'light') : s.theme;
   root.dataset.backdrop = S.backdrop;
   root.toggleAttribute('data-compact', !!s.compact);
@@ -502,7 +502,8 @@ const SCHEMA = [
   ['Appearance', [
     { k: 'theme', label: 'Theme', type: 'seg', opts: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] },
     { k: 'backdrop', label: 'Glass', type: 'seg', opts: [['blur', 'Blur'], ['acrylic', 'Acrylic'], ['mica', 'Mica'], ['none', 'Solid']], hint: backdropHint },
-    { k: 'tint', label: 'Glass tint', type: 'range', min: 0, max: 100, unit: '%' },
+    { k: 'tint', label: 'Background opacity', desc: '0% is clear glass, 100% is solid', type: 'range', min: 0, max: 100, unit: '%' },
+    { k: 'window_opacity', label: 'Window opacity', desc: 'Fades the whole window, websites included', type: 'range', min: 20, max: 100, unit: '%' },
     { k: 'radius', label: 'Roundness', type: 'range', min: 0, max: 24, unit: 'px' },
     { k: 'accent', label: 'Accent color', type: 'color' },
     { k: 'compact', label: 'Compact layout', desc: 'Tabs and address bar share one row', type: 'toggle' },

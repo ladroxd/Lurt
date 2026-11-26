@@ -143,6 +143,7 @@ fn main() {
     let window = builder.build(&event_loop).expect("window");
     mark("window created");
     let backdrop = glass::apply(&window, &settings.backdrop);
+    glass::set_window_opacity(&window, settings.window_opacity);
     mark("backdrop applied");
 
     // Show the window right away with a skeleton of the UI; the WebView2 engine
@@ -162,7 +163,7 @@ fn main() {
                 || session.tabs.get(session.active).is_none_or(|t| t.url.is_empty()));
         let pos = window.inner_position().unwrap_or_default();
         let size = window.inner_size();
-        let tint = if backdrop == "none" { 1.0 } else { 0.12 + f32::from(settings.tint) / 100.0 * 0.86 };
+        let tint = if backdrop == "none" { 1.0 } else { f32::from(settings.tint) / 100.0 };
         splash::show(
             windows::Win32::Foundation::HWND(window.hwnd() as _),
             pos.x,
@@ -248,6 +249,9 @@ fn main() {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => app.quit = true,
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    // Windows 10's blur stays at the old size/position after a maximize
+                    // or restore unless it is applied again.
+                    app.backdrop = glass::apply(&app.window, &app.settings.backdrop);
                     app.layout();
                     app.push_state();
                 }
@@ -698,6 +702,9 @@ impl App {
         let s = &self.settings;
         if old.backdrop != s.backdrop {
             self.backdrop = glass::apply(&self.window, &s.backdrop);
+        }
+        if old.window_opacity != s.window_opacity {
+            glass::set_window_opacity(&self.window, s.window_opacity);
         }
         if old.theme != s.theme {
             let theme = theme_of(&s.theme);

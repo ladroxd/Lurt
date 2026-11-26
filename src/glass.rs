@@ -1,10 +1,36 @@
 //! Native window backdrop (the blur behind the glass) and rounded page corners.
 
 use tao::window::Window;
+use tao::platform::windows::WindowExtWindows;
 use windows::Win32::{
-    Foundation::HWND,
+    Foundation::{COLORREF, HWND},
     Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn},
+    UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongPtrW,
+        WS_EX_LAYERED,
+    },
 };
+
+/// Fade the whole window, pages included. `percent` is 10..=100; 100 turns it off.
+pub fn set_window_opacity(window: &Window, percent: u8) {
+    let hwnd = HWND(window.hwnd() as _);
+    let percent = percent.clamp(10, 100);
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let layered = WS_EX_LAYERED.0 as isize;
+        if percent >= 100 {
+            if ex & layered != 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !layered);
+            }
+            return;
+        }
+        if ex & layered == 0 {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | layered);
+        }
+        let alpha = (u32::from(percent) * 255 / 100) as u8;
+        let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+    }
+}
 
 /// Apply a backdrop and return the one that actually took effect.
 /// Mica only exists on Windows 11; on Windows 10 it falls back to blur.
