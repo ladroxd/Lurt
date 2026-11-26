@@ -74,7 +74,7 @@ pub fn detect() -> Vec<Source> {
             continue;
         }
         // Opera keeps a single profile in the root itself.
-        if root.join("History").exists() || root.join("Bookmarks").exists() {
+        if has_data(&root) {
             out.push(Source { id: root.to_string_lossy().into(), browser: browser.into(), profile: String::new(), email: String::new() });
             continue;
         }
@@ -83,7 +83,7 @@ pub fn detect() -> Vec<Source> {
         let mut dirs: Vec<PathBuf> = rd
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.join("History").exists() || p.join("Bookmarks").exists())
+            .filter(|p| has_data(p))
             .collect();
         dirs.sort();
         for dir in dirs {
@@ -117,6 +117,12 @@ fn profile_names(root: &Path) -> HashMap<String, (String, String)> {
     map
 }
 
+const BOOKMARK_FILES: [&str; 2] = ["Bookmarks", "AccountBookmarks"];
+
+fn has_data(dir: &Path) -> bool {
+    dir.join("History").exists() || BOOKMARK_FILES.iter().any(|f| dir.join(f).exists())
+}
+
 /// Read one detected profile. `id` must be a path previously returned by `detect`.
 pub fn read_profile(id: &str, scratch: &Path) -> Result<Batch, String> {
     if !detect().iter().any(|s| s.id == id) {
@@ -124,8 +130,12 @@ pub fn read_profile(id: &str, scratch: &Path) -> Result<Batch, String> {
     }
     let dir = PathBuf::from(id);
     let mut batch = Batch::default();
-    if let Ok(text) = fs::read_to_string(dir.join("Bookmarks")) {
-        chromium_bookmarks(&text, &mut batch.bookmarks);
+    // "Bookmarks" holds local and synced bookmarks. Newer Chrome keeps the bookmarks of a
+    // Google account that's signed in without full sync in "AccountBookmarks" instead.
+    for file in BOOKMARK_FILES {
+        if let Ok(text) = fs::read_to_string(dir.join(file)) {
+            chromium_bookmarks(&text, &mut batch.bookmarks);
+        }
     }
     let hist = dir.join("History");
     if hist.exists() {
