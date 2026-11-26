@@ -34,6 +34,8 @@ pub struct Tab {
     pub blocked: u32,
     /// What was blocked on the current page: (request URL, resource type). Capped.
     pub blocked_log: Vec<(String, &'static str)>,
+    /// A JPEG of the page taken when you last left the tab, shown blurred while it wakes.
+    pub preview: Option<Vec<u8>>,
     pub back: bool,
     pub fwd: bool,
     pub last_active: Instant,
@@ -55,6 +57,7 @@ impl Tab {
             loading: false,
             blocked: 0,
             blocked_log: Vec::new(),
+            preview: None,
             back: false,
             fwd: false,
             last_active: Instant::now(),
@@ -286,11 +289,12 @@ pub fn is_playing_audio(view: &WebView) -> bool {
     }
 }
 
-/// Take a JPEG of the page; it arrives as `Ev::Snapshot`.
-pub fn snapshot(view: &WebView, id: u32, proxy: EventLoopProxy<Ev>) {
+/// Take a JPEG of the page; it arrives as `Ev::Snapshot`. `preview` marks a picture
+/// kept for when the tab wakes up, rather than one for the address bar overlay.
+pub fn snapshot(view: &WebView, id: u32, proxy: EventLoopProxy<Ev>, preview: bool) {
     unsafe {
         let Some(stream) = SHCreateMemStream(None) else {
-            let _ = proxy.send_event(Ev::Snapshot(id, Vec::new()));
+            let _ = proxy.send_event(Ev::Snapshot(id, Vec::new(), preview));
             return;
         };
         let s2 = stream.clone();
@@ -300,12 +304,12 @@ pub fn snapshot(view: &WebView, id: u32, proxy: EventLoopProxy<Ev>) {
             &stream,
             &CapturePreviewCompletedHandler::create(Box::new(move |res| {
                 let bytes = if res.is_ok() { read_stream(&s2) } else { Vec::new() };
-                let _ = p.send_event(Ev::Snapshot(id, bytes));
+                let _ = p.send_event(Ev::Snapshot(id, bytes, preview));
                 Ok(())
             })),
         );
         if r.is_err() {
-            let _ = proxy.send_event(Ev::Snapshot(id, Vec::new()));
+            let _ = proxy.send_event(Ev::Snapshot(id, Vec::new(), preview));
         }
     }
 }

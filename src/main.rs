@@ -53,7 +53,8 @@ pub enum Ev {
     /// Tab id, blocked request URL, resource type.
     Blocked(u32, String, &'static str),
     Fullscreen(u32, bool),
-    Snapshot(u32, Vec<u8>),
+    /// Tab id, JPEG bytes (empty on failure), and whether it is a wake-up preview.
+    Snapshot(u32, Vec<u8>, bool),
     /// (serialized engine, freshly downloaded?)
     ShieldReady(Vec<u8>, bool),
     ShieldFailed,
@@ -299,6 +300,18 @@ impl App {
         self.tabs.iter_mut().find(|t| t.id == id)
     }
 
+    /// While a woken tab loads, the UI shows its last picture, blurred.
+    fn send_preview(&self, id: u32) {
+        let Some(t) = self.tab(id) else { return };
+        if t.url.is_empty() || (t.view.is_some() && t.shown) {
+            return;
+        }
+        let img = t.preview.as_ref().map(|b| {
+            format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b))
+        });
+        self.send(json!({ "t": "preview", "id": id, "img": img }));
+    }
+
     fn active_view(&self) -> Option<&WebView> {
         self.tab(self.active).and_then(|t| t.view.as_ref())
     }
@@ -533,6 +546,14 @@ impl App {
         if let Some(t) = self.tab_mut(prev) {
             t.last_active = now;
         }
+        // Remember how the tab you're leaving looks, for when it wakes from sleep.
+        if prev != id {
+            if let Some(t) = self.tab(prev) {
+                if let (Some(v), true, false) = (&t.view, t.shown, t.url.is_empty()) {
+                    tabs::snapshot(v, prev, self.proxy.clone(), true);
+                }
+            }
+        }
         self.active = id;
         self.overlay = false;
         for t in &self.tabs {
@@ -547,6 +568,7 @@ impl App {
         if let Some(t) = self.tab_mut(id) {
             t.last_active = now;
         }
+        self.send_preview(id);
         if let Some(v) = self.active_view() {
             let _ = v.set_memory_usage_level(MemoryUsageLevel::Normal);
         }
@@ -914,7 +936,14 @@ impl App {
                     self.push_state();
                 }
             }
-            Ev::Snapshot(id, bytes) => {
+            Ev::Snapshot(id, bytes, true) => {
+                if !bytes.is_empty() {
+                    if let Some(t) = self.tab_mut(id) {
+                        t.preview = Some(bytes);
+                    }
+                }
+            }
+            Ev::Snapshot(id, bytes, false) => {
                 if self.overlay && id == self.active {
                     let snap = if bytes.is_empty() {
                         Value::Null
@@ -1090,7 +1119,7 @@ impl App {
                 if self.overlay {
                     let ready = self.tab(self.active).is_some_and(|t| t.shown);
                     match self.active_view().filter(|_| ready) {
-                        Some(v) => tabs::snapshot(v, self.active, self.proxy.clone()),
+                        Some(v) => tabs::snapshot(v, self.active, self.proxy.clone(), false),
                         None => self.send(json!({ "t": "overlay", "snap": null })),
                     }
                 } else if let Some(t) = self.tab(self.active) {

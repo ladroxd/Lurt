@@ -125,6 +125,10 @@ const H = {
     if (m.id === S.active) renderShield();
     if (m.id === S.active && (S.overlay === 'shield-open' || S.panel === 'trackers')) refreshTrackers();
   },
+  preview(m) {
+    if (!m.img) { S.previews.delete(m.id); renderWake(cur()); return; }
+    shrinkPreview(m.img).then((small) => { S.previews.set(m.id, small); renderWake(cur()); });
+  },
   shieldInfo(m) {
     if (m.id !== S.active) return;
     S.shieldInfo = m;
@@ -244,7 +248,9 @@ function renderBar() {
   $('#win [data-a="max"]').innerHTML = S.max ? WIN.restore : WIN.max;
   $('#win [data-a="max"]').title = S.max ? 'Restore' : 'Maximize';
   document.documentElement.toggleAttribute('data-max', !!S.max);
-  document.body.classList.toggle('waking', !!(t && t.url && !t.shown));
+  const waking = !!(t && t.url && !t.shown);
+  document.body.classList.toggle('waking', waking);
+  if (waking) renderWake(t);
   renderShield();
 }
 function renderShield() {
@@ -272,6 +278,39 @@ $('#reload').onclick = () => send({ t: 'nav', a: 'reload' });
 $('#home').onclick = () => send({ t: 'nav', a: 'home' });
 $('#star').onclick = () => send({ t: 'star' });
 $('#shield').onclick = () => (S.overlay === 'shield-open' ? closeShield() : openShield());
+
+// ---- waking tab ------------------------------------------------------------
+// The tab's last picture, shrunk to a tiny image so blurring it is nearly free.
+S.previews = new Map();
+function shrinkPreview(src) {
+  return new Promise((done) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = 120; const h = Math.max(1, Math.round((img.height / img.width) * w));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      done(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => done(null);
+    img.src = src;
+  });
+}
+function renderWake(t) {
+  if (!t || !t.url || t.shown) return;
+  const w = $('#wake'); const bg = w.querySelector('.wake-bg');
+  const pic = S.previews.get(t.id);
+  if (bg._pic !== pic) {
+    bg._pic = pic;
+    bg.style.backgroundImage = pic ? `url("${pic}")` : '';
+    bg.classList.toggle('none', !pic);
+  }
+  if (w._id !== t.id) {
+    w._id = t.id;
+    const host = hostOf(t.url);
+    w.querySelector('.orb-ic').innerHTML = `<img src="${esc(t.fav || `https://${host}/favicon.ico`)}" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(t.url, t.title)))}">`;
+    w.querySelector('.wake-t').textContent = `Waking up ${host || pretty(t.url)}`;
+  }
+}
 
 // ---- shield popover ---------------------------------------------------------
 const pop = $('#shield-pop');

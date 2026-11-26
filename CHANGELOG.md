@@ -16,7 +16,8 @@ All notable changes to Lurt are listed here, newest first.
 - The blur behind the window is tinted dark in dark mode and light in light mode, so low background opacity shows the desktop without washing the UI out to gray.
 - Background opacity and window opacity (fades the whole window, websites included) sliders.
 - After a maximize, restore or resize, the window is re-presented once resizing settles, so the Windows 10 blur covers the whole window instead of leaving a gray rectangle at the old size.
-- Native startup skeleton that appears in about 30 ms while WebView2 starts, and a page skeleton for tabs until their content is ready.
+- Native startup skeleton that appears in about 30 ms while WebView2 starts.
+- Waking a sleeping tab shows a blurred picture of how you left it (or a soft accent glow) with a spinning glass ring around the site's icon, instead of a white flash.
 - Tabs that share one engine process, open lazily, and sleep when idle.
 - Address bar with bookmark and history suggestions over a blurred snapshot of the page.
 - Ad and tracker blocking (EasyList, EasyPrivacy, Peter Lowe's list) plus WebView2 tracking prevention.
