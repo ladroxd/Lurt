@@ -642,7 +642,10 @@ ctx.addEventListener('click', (e) => {
   const it = ctx._items[+b.dataset.i]; hideMenu(); it.run();
 });
 addEventListener('mousedown', (e) => { if (!ctx.contains(e.target)) hideMenu(); }, true);
-addEventListener('blur', hideMenu);
+// Close when you switch to another app, but not on the blink of focus while a website is
+// swapped for its snapshot (Lurt hides the page and refocuses the toolbar), which used to
+// close right-click menus on the bookmarks bar as soon as they opened.
+addEventListener('blur', () => setTimeout(() => { if (!document.hasFocus()) hideMenu(); }, 150));
 
 // ---- add / edit favourite dialog ------------------------------------------------
 const dlg = $('#tile-dlg');
@@ -900,7 +903,12 @@ function bmContext(e) {
   bmOverlay();
   showMenu(e.clientX, e.clientY, items);
 }
-document.addEventListener('contextmenu', (e) => { if (e.target.closest('#bmbar, .bm-menu')) bmContext(e); });
+document.addEventListener('contextmenu', (e) => {
+  // The bar can redraw between pressing and releasing the button (a website swapping for its
+  // snapshot re-renders it), leaving e.target detached: use what's under the mouse now.
+  const target = e.target.isConnected ? e.target : document.elementFromPoint(e.clientX, e.clientY);
+  if (target?.closest('#bmbar, .bm-menu')) { e.preventDefault(); bmContext({ target, clientX: e.clientX, clientY: e.clientY }); }
+});
 
 // ---- add / edit dialogs (the favourite dialog's frame)
 function bmDialog(title, fields, save) {
