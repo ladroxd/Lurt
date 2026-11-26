@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-mode="dark" data-backdrop="blur">
+<head>
+<meta charset="utf-8">
+<title>Lurt</title>
+<style>/*CSS*/</style>
+<style id="ui-css"></style>
+<style id="mods-css"></style>
+</head>
+<body class="blank">
+<div id="app">
+  <header id="top" class="drag">
+    <div id="tabs">
+      <div id="tablist" role="tablist"></div>
+      <button id="newtab" class="icon" title="New tab (Ctrl+T)"></button>
+      <div class="drag-fill"></div>
+    </div>
+
+    <div id="nav">
+      <button id="back" class="icon" title="Back (Alt+Left)"></button>
+      <button id="fwd" class="icon" title="Forward (Alt+Right)"></button>
+      <button id="reload" class="icon" title="Reload (F5)"></button>
+      <button id="home" class="icon" title="Home"></button>
+    </div>
+
+    <div id="omni" class="glass lens">
+      <span id="lock"></span>
+      <input id="addr" spellcheck="false" autocomplete="off" placeholder="Search or enter address">
+      <span id="chip"></span>
+      <button id="star" class="icon sm" title="Bookmark (Ctrl+D)"></button>
+    </div>
+
+    <div id="acts">
+      <button id="shield" class="icon" title="Ad &amp; tracker blocking"><span id="shield-n"></span></button>
+      <button id="menu" class="icon" title="Bookmarks, history &amp; settings"></button>
+    </div>
+
+    <div id="win">
+      <button data-a="min" title="Minimize"></button>
+      <button data-a="max" title="Maximize"></button>
+      <button data-a="close" class="close" title="Close"></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="viewport">
+      <img id="snap" alt="">
+      <div id="loader"><i></i></div>
+      <div id="start">
+        <div id="clock"><div id="time"></div><div id="date"></div></div>
+        <button id="start-search" class="glass lens"><span class="ic"></span><span>Search or enter address</span><kbd>Ctrl L</kbd></button>
+        <div id="tiles"></div>
+      </div>
+    </section>
+
+    <aside id="side" class="glass">
+      <div class="side-head">
+        <div class="seg" id="side-seg">
+          <i class="seg-pill"></i>
+          <button data-p="bookmarks">Bookmarks</button>
+          <button data-p="history">History</button>
+          <button data-p="settings">Settings</button>
+        </div>
+        <button id="side-close" class="icon sm" title="Close (Esc)"></button>
+      </div>
+      <div id="side-search"><input id="side-q" placeholder="Search history" spellcheck="false"></div>
+      <div id="side-body"></div>
+    </aside>
+  </main>
+
+  <div id="sugg" class="glass"></div>
+
+  <div class="rz" data-d="n"></div><div class="rz" data-d="s"></div>
+  <div class="rz" data-d="e"></div><div class="rz" data-d="w"></div>
+  <div class="rz" data-d="ne"></div><div class="rz" data-d="nw"></div>
+  <div class="rz" data-d="se"></div><div class="rz" data-d="sw"></div>
+</div>
+<script>/*JS*/</script>
+</body>
+</html>
