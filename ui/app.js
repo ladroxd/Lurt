@@ -27,6 +27,18 @@ const P = {
   refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   sparkle: '<path d="M12 4l1.8 5.2L19 11l-5.2 1.8L12 18l-1.8-5.2L5 11l5.2-1.8z"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  palette: '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.3-1.1-1.6-1.1-2.8 0-1 .8-1.6 1.8-1.6h2.2a3.8 3.8 0 0 0 3.8-3.8c0-4-3.8-7.1-8.5-7.1z"/><circle cx="7.8" cy="11.2" r=".6"/><circle cx="10.4" cy="7.6" r=".6"/><circle cx="14.8" cy="7.8" r=".6"/>',
+  grid: '<rect x="4.5" y="4.5" width="6" height="6" rx="1.6"/><rect x="13.5" y="4.5" width="6" height="6" rx="1.6"/><rect x="4.5" y="13.5" width="6" height="6" rx="1.6"/><rect x="13.5" y="13.5" width="6" height="6" rx="1.6"/>',
+  database: '<ellipse cx="12" cy="6.5" rx="7" ry="2.8"/><path d="M5 6.5v11c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-11M5 12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8"/>',
+  bolt: '<path d="M13 3.5L5.5 13.5H12l-1 7 7.5-10H12z"/>',
+  code: '<path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/>',
+  pin: '<path d="M9 4.5h6l-1 5 3 3H7l3-3zM12 12.5V20"/>',
+  edit: '<path d="M14.5 5.5l4 4L9 19H5v-4z"/>',
+  external: '<path d="M13.5 5.5h5v5M18.5 5.5L11 13M17 13.5V18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4.5"/>',
+  download: '<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
 const WIN = {
@@ -75,10 +87,11 @@ const H = {
   settings(m) {
     S.settings = m.s; S.backdrop = m.backdrop; S.shieldReady = m.shield; S.modsDir = m.modsDir;
     applyLook();
-    if (S.panel === 'settings' && !$('#side').contains(document.activeElement)) renderSettings();
+    if (!document.activeElement?.closest('#settings, #side')) renderSettings();
+    renderTiles();
   },
   list(m) {
-    if (m.kind === 'top') renderTiles(m.items);
+    if (m.kind === 'top') { S.top = m.items; renderTiles(); }
     else if (S.panel === m.kind) renderList(m.kind, m.items);
   },
   suggest(m) { if (m.q === addr.value.trim()) renderSugg(m.items); },
@@ -93,32 +106,31 @@ const H = {
     snap.src = m.snap;
   },
   focus() { addr.focus(); addr.select(); },
-  panel(m) { togglePanel(m.p); },
+  panel(m) { if (m.p === 'settings') openSettings(); else togglePanel(m.p); },
   mods(m) { $('#mods-css').textContent = m.css || ''; },
   toast(m) { toast(m.text); },
   sources(m) {
     S.sources = m.items;
-    if (S.panel === 'settings' && !$('#side').contains(document.activeElement)) renderSettings();
+    if (settingsOpen()) renderSettings();
   },
   imported(m) {
     S.importing = null;
     S.importMsg = m.text;
     toast(m.text);
-    if (S.panel === 'settings') renderSettings();
+    renderSettings();
   },
   blocked(m) {
     const t = S.tabs.find((x) => x.id === m.id);
     if (t) t.blocked = m.n;
     if (m.id === S.active) renderShield();
-    if (m.id === S.active && S.overlay === 'shield-open') {
-      clearTimeout(popT); popT = setTimeout(() => send({ t: 'shieldInfo' }), 250);
-    }
+    if (m.id === S.active && (S.overlay === 'shield-open' || S.panel === 'trackers')) refreshTrackers();
   },
   shieldInfo(m) {
-    if (m.id !== S.active || S.overlay !== 'shield-open') return;
+    if (m.id !== S.active) return;
     S.shieldInfo = m;
     const t = cur(); if (t) t.blocked = m.n;
-    renderPop();
+    if (S.overlay === 'shield-open') renderPop();
+    if (S.panel === 'trackers') renderTrackers();
   },
 };
 window.lurt = { on: (m) => { try { (H[m.t] || (() => {}))(m); } catch (e) { console.error(e); } } };
@@ -237,6 +249,10 @@ function renderBar() {
 }
 function renderShield() {
   if (S.overlay === 'shield-open' && pop._tab !== S.active) closeShield(false);
+  if (S.panel === 'trackers') {
+    const key = `${S.active}|${cur()?.url}|${S.allowed}|${S.settings?.adblock}`;
+    if (key !== S.trkKey) { S.trkKey = key; S.shieldInfo = null; renderTrackers(); refreshTrackers(); }
+  }
   const t = cur(); const b = $('#shield'); const n = $('#shield-n');
   const on = S.settings ? S.settings.adblock && !S.allowed : true;
   b.classList.toggle('off', !on);
@@ -264,11 +280,18 @@ const KINDS = { script: 'scripts', image: 'images', xhr: 'requests', stylesheet:
 S.shieldInfo = null;
 let popT;
 function openShield() {
+  if (settingsOpen()) return;
   S.shieldInfo = null; pop._tab = S.active;
   renderPop();
   openOverlay('shield-open');
   send({ t: 'shieldInfo' });
 }
+function blockedList(info) {
+  return `<div class="blk">` + info.items.map((i) =>
+    `<div class="item" title="${esc(i.h)}"><span class="fav">${letter('https://' + i.h, i.h)}</span><div class="txt"><span class="t">${esc(i.h)}</span>` +
+    `<span class="u">${esc(i.k.map((k) => KINDS[k] || k).join(', '))}</span></div><em>${i.n}</em></div>`).join('') + `</div>`;
+}
+function refreshTrackers() { clearTimeout(popT); popT = setTimeout(() => send({ t: 'shieldInfo' }), 200); }
 function closeShield(focusPage) {
   if (S.overlay === 'shield-open') closeOverlay(focusPage);
 }
@@ -298,14 +321,12 @@ function renderPop() {
     if (!info) html += `<div class="empty">Loading details...</div>`;
     else if (!info.items.length) html += `<div class="empty">Nothing blocked yet. Trackers that load later will show up here.</div>`;
     else {
-      html += `<div class="list">` + info.items.map((i) =>
-        `<div class="item" title="${esc(i.h)}"><span class="fav">${letter('https://' + i.h, i.h)}</span><div class="txt"><span class="t">${esc(i.h)}</span>` +
-        `<span class="u">${esc(i.k.map((k) => KINDS[k] || k).join(', '))}</span></div><em>${i.n}</em></div>`).join('') + `</div>`;
+      html += blockedList(info);
     }
   } else if (!host && global) {
     html += `<div class="empty">Open a website to see what gets blocked.</div>`;
   }
-  html += `<div class="foot"><button data-a="settings">Blocking settings</button></div>`;
+  html += `<div class="foot"><button data-a="settings">More in Trackers</button></div>`;
   pop.innerHTML = html;
   placePop();
 }
@@ -317,7 +338,7 @@ pop.addEventListener('change', (e) => {
   setTimeout(() => closeShield(false), 280);
 });
 pop.addEventListener('click', (e) => {
-  if (e.target.closest('[data-a="settings"]')) { closeShield(false); togglePanel('settings'); }
+  if (e.target.closest('[data-a="settings"]')) { closeShield(false); if (S.panel !== 'trackers') togglePanel('trackers'); }
 });
 addEventListener('mousedown', (e) => {
   if (S.overlay === 'shield-open' && !pop.contains(e.target) && !$('#shield').contains(e.target)) closeShield(false);
@@ -327,6 +348,8 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('resize', () => S.overlay === 'shield-open' && placePop());
 $('#menu').onclick = () => togglePanel(S.panel || S.lastPanel);
+$('#gear').innerHTML = icon('gear');
+$('#gear').onclick = () => (settingsOpen() ? closeSettings() : openSettings());
 $('#start-search').onclick = () => addr.focus();
 for (const b of document.querySelectorAll('#win button')) b.onclick = () => send({ t: 'win', a: b.dataset.a });
 
@@ -407,6 +430,7 @@ function pick(i, newTab) {
 let suggT;
 addr.addEventListener('focus', () => {
   if (S.overlay === 'shield-open') closeShield();
+  if (settingsOpen()) closeSettings();
   const t = cur();
   addr.value = t?.url || '';
   addr.select();
@@ -461,20 +485,130 @@ function renderStart() {
   if (blank && !S.blankInit) { S.blankInit = true; send({ t: 'list', kind: 'top' }); }
   S.blank = blank;
 }
-function renderTiles(items) {
-  $('#tiles').innerHTML = items.slice(0, 8).map((i) => {
+// Favourites (pinned by you) come first, then most-visited sites you haven't removed.
+S.top = [];
+function tileList() {
+  const s = S.settings || {};
+  const pins = (s.shortcuts || []).map((p) => ({ ...p, pinned: true }));
+  const hidden = new Set(s.hidden_tiles || []);
+  const taken = new Set(pins.map((p) => hostOf(p.url)));
+  const rest = S.top.filter((i) => {
+    const h = hostOf(i.url);
+    if (!h || hidden.has(h) || taken.has(h)) return false;
+    taken.add(h); return true;
+  });
+  return [...pins, ...rest.slice(0, Math.max(0, 8 - pins.length))];
+}
+function tileName(i) {
+  const host = hostOf(i.url);
+  if (i.pinned && i.title) return i.title;
+  return (i.title || host).split(/[|\-–—:·]/)[0].trim() || host;
+}
+function renderTiles() {
+  S.tiles = tileList();
+  $('#tiles').innerHTML = S.tiles.map((i, n) => {
     const host = hostOf(i.url);
-    const name = (i.title || host).split(/[|\-–—:·]/)[0].trim() || host;
-    return `<button class="tile" data-url="${esc(i.url)}" title="${esc(i.title || i.url)}"><span class="ic glass">` +
-      `<img src="https://${esc(host)}/favicon.ico" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(i.url, i.title)))}"></span><span>${esc(name)}</span></button>`;
-  }).join('');
+    return `<button class="tile${i.pinned ? ' pinned' : ''}" data-i="${n}" data-url="${esc(i.url)}" title="${esc(i.title || i.url)}"><span class="ic glass">` +
+      `<img src="https://${esc(host)}/favicon.ico" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(i.url, i.title)))}"></span><span>${esc(tileName(i))}</span></button>`;
+  }).join('') + `<button class="tile add" data-add title="Add a favourite"><span class="ic glass">${icon('plus')}</span><span>Add</span></button>`;
 }
 $('#tiles').addEventListener('click', (e) => {
-  const b = e.target.closest('.tile'); if (b) send({ t: 'open', url: b.dataset.url, newTab: e.ctrlKey });
+  if (e.target.closest('[data-add]')) { editTile(null); return; }
+  const b = e.target.closest('.tile[data-url]'); if (b) send({ t: 'open', url: b.dataset.url, newTab: e.ctrlKey });
 });
 $('#tiles').addEventListener('auxclick', (e) => {
-  const b = e.target.closest('.tile'); if (b && e.button === 1) send({ t: 'open', url: b.dataset.url, newTab: true });
+  const b = e.target.closest('.tile[data-url]'); if (b && e.button === 1) send({ t: 'open', url: b.dataset.url, newTab: true });
 });
+$('#tiles').addEventListener('contextmenu', (e) => {
+  const b = e.target.closest('.tile[data-i]'); if (!b) return;
+  e.preventDefault();
+  const t = S.tiles[+b.dataset.i]; if (!t) return;
+  const items = [
+    { icon: 'arrow', label: 'Open', run: () => send({ t: 'open', url: t.url }) },
+    { icon: 'external', label: 'Open in new tab', run: () => send({ t: 'open', url: t.url, newTab: true }) },
+    '-',
+  ];
+  if (t.pinned) {
+    items.push({ icon: 'edit', label: 'Edit', run: () => editTile(t) });
+    items.push({ icon: 'trash', label: 'Remove from favourites', danger: true, run: () => removePin(t.url) });
+  } else {
+    items.push({ icon: 'pin', label: 'Add to favourites', run: () => savePin(null, tileName(t), t.url) });
+    items.push({ icon: 'trash', label: 'Remove from start page', danger: true, run: () => hideTile(t.url) });
+  }
+  showMenu(e.clientX, e.clientY, items);
+});
+function savePin(origUrl, title, url) {
+  const list = [...(S.settings.shortcuts || [])];
+  const i = origUrl ? list.findIndex((p) => p.url === origUrl) : -1;
+  if (i >= 0) list[i] = { title, url }; else list.push({ title, url });
+  // A pinned site shouldn't stay hidden.
+  setSetting('hidden_tiles', (S.settings.hidden_tiles || []).filter((h) => h !== hostOf(url)));
+  setSetting('shortcuts', list, { rerender: true });
+}
+function removePin(url) {
+  setSetting('shortcuts', (S.settings.shortcuts || []).filter((p) => p.url !== url), { rerender: true });
+  toast('Removed from favourites');
+}
+function hideTile(url) {
+  const h = hostOf(url); if (!h) return;
+  setSetting('hidden_tiles', [...new Set([...(S.settings.hidden_tiles || []), h])], { rerender: true });
+  toast(`Removed ${h}. Bring it back in Settings → Start page`);
+}
+
+// ---- right-click menu --------------------------------------------------------
+const ctx = $('#ctx');
+function showMenu(x, y, items) {
+  ctx._items = items;
+  ctx.innerHTML = items.map((it, i) => it === '-' ? '<hr>'
+    : `<button data-i="${i}" class="${it.danger ? 'danger' : ''}">${icon(it.icon)}${esc(it.label)}</button>`).join('');
+  document.body.classList.add('ctx-open');
+  ctx.style.left = Math.max(6, Math.min(x, innerWidth - ctx.offsetWidth - 6)) + 'px';
+  ctx.style.top = Math.max(6, Math.min(y, innerHeight - ctx.offsetHeight - 6)) + 'px';
+}
+function hideMenu() { document.body.classList.remove('ctx-open'); }
+ctx.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-i]'); if (!b) return;
+  const it = ctx._items[+b.dataset.i]; hideMenu(); it.run();
+});
+addEventListener('mousedown', (e) => { if (!ctx.contains(e.target)) hideMenu(); }, true);
+addEventListener('blur', hideMenu);
+
+// ---- add / edit favourite dialog ------------------------------------------------
+const dlg = $('#tile-dlg');
+function editTile(t) {
+  dlg._orig = t ? t.url : null;
+  dlg.innerHTML = `<h3>${t ? 'Edit favourite' : 'Add a favourite'}</h3>` +
+    `<label>Address<input class="field" id="td-url" value="${esc(t?.url || '')}" placeholder="youtube.com" spellcheck="false"></label>` +
+    `<label>Name<input class="field" id="td-name" value="${esc(t ? tileName(t) : '')}" placeholder="Optional" spellcheck="false"></label>` +
+    `<div class="err" id="td-err"></div>` +
+    `<div class="btns"><button class="btn" data-d="cancel">Cancel</button><button class="btn primary" data-d="save">Save</button></div>`;
+  document.body.classList.add('dlg-open');
+  setTimeout(() => $('#td-url').focus(), 30);
+}
+function closeDlg() { document.body.classList.remove('dlg-open'); }
+function saveDlg() {
+  let u = $('#td-url').value.trim();
+  if (!u) { $('#td-err').textContent = 'Type an address, like youtube.com'; return; }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+  try { if (!new URL(u).hostname.includes('.') && !/^https?:\/\/localhost/i.test(u)) throw 0; }
+  catch { $('#td-err').textContent = "That doesn't look like a web address"; return; }
+  const name = $('#td-name').value.trim() || hostOf(u).split('.')[0].replace(/^./, (c) => c.toUpperCase());
+  savePin(dlg._orig, name, u);
+  closeDlg();
+}
+dlg.addEventListener('click', (e) => {
+  const d = e.target.closest('[data-d]')?.dataset.d;
+  if (d === 'cancel') closeDlg();
+  if (d === 'save') saveDlg();
+});
+dlg.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); saveDlg(); }
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDlg(); }
+});
+$('#scrim').addEventListener('mousedown', () => {
+  if (document.body.classList.contains('dlg-open')) closeDlg(); else closeSettings();
+});
+
 function tickClock() {
   const d = new Date();
   $('#time').textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -488,13 +622,13 @@ function togglePanel(p) {
   if (S.panel === p) return closePanel();
   S.panel = p; S.lastPanel = p;
   document.body.classList.add('side-open');
-  document.body.classList.remove('panel-bookmarks', 'panel-history', 'panel-settings');
+  document.body.classList.remove('panel-bookmarks', 'panel-history', 'panel-trackers');
   document.body.classList.add('panel-' + p);
   const btns = [...document.querySelectorAll('#side-seg button')];
   btns.forEach((b) => b.classList.toggle('on', b.dataset.p === p));
   movePill($('#side-seg'));
   $('#side-body').scrollTop = 0;
-  if (p === 'settings') { renderSettings(); send({ t: 'importSources' }); }
+  if (p === 'trackers') { S.trkKey = ''; renderShield(); }
   else { $('#side-body').innerHTML = ''; send({ t: 'list', kind: p, q: p === 'history' ? $('#side-q').value : '' }); }
   if (p === 'history') setTimeout(() => $('#side-q').focus(), 60);
 }
@@ -577,45 +711,94 @@ function runAction(btn) {
 }
 
 // ---- settings --------------------------------------------------------------
+// A centered window over a blurred view of the browser, with a section list on the left.
 const ACCENTS = ['#8ab4ff', '#a78bfa', '#f472b6', '#fb7185', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#e2e8f0'];
-const SCHEMA = [
-  ['Appearance', [
-    { k: 'theme', label: 'Theme', type: 'seg', opts: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] },
-    { k: 'backdrop', label: 'Glass', type: 'seg', opts: [['blur', 'Blur'], ['acrylic', 'Acrylic'], ['mica', 'Mica'], ['none', 'Solid']], hint: backdropHint },
-    { k: 'tint', label: 'Background opacity', desc: 'Lower shows more of what is behind the window', type: 'range', min: 0, max: 100, unit: '%' },
-    { k: 'window_opacity', label: 'Window opacity', desc: 'Fades the whole window, websites included', type: 'range', min: 20, max: 100, unit: '%' },
-    { k: 'radius', label: 'Roundness', type: 'range', min: 0, max: 24, unit: 'px' },
-    { k: 'accent', label: 'Accent color', type: 'color' },
-    { k: 'compact', label: 'Compact layout', desc: 'Tabs and address bar share one row', type: 'toggle' },
-    { k: 'rounded_pages', label: 'Rounded page corners', type: 'toggle' },
-    { k: 'show_clock', label: 'Clock on the start page', type: 'toggle' },
-    { k: 'reduce_motion', label: 'Reduce motion', desc: 'Turn off animations', type: 'toggle' },
-  ]],
-  ['Browsing', [
-    { k: 'search', label: 'Search engine', type: 'select', opts: Object.entries(ENGINES) },
-    { k: 'homepage', label: 'Home button opens', desc: 'Leave empty for the start page', type: 'text', placeholder: 'Start page' },
-    { k: 'restore_session', label: 'Reopen last session\'s tabs', type: 'toggle' },
-  ]],
-  ['Privacy', [
-    { k: 'adblock', label: 'Block ads & trackers', desc: () => S.shieldReady ? 'EasyList, EasyPrivacy and Peter Lowe\'s list' : 'Downloading filter lists...', type: 'toggle' },
-    { type: 'allow' },
-    { k: 'tracking', label: 'Tracking prevention', desc: 'Built into the engine; Strict may break some sites', type: 'select', opts: [['strict', 'Strict'], ['balanced', 'Balanced'], ['basic', 'Basic'], ['off', 'Off']] },
-    { type: 'buttons', items: [['updateLists', 'refresh', 'Update filter lists'], ['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] },
-  ]],
-  ['Your data', [
-    { type: 'import' },
-    { k: 'save_passwords', label: 'Offer to save passwords', desc: "Saved in Lurt's profile on this PC", type: 'toggle' },
-    { k: 'autofill', label: 'Autofill forms', desc: 'Addresses and other details you type', type: 'toggle' },
-  ]],
-  ['Performance', [
-    { k: 'sleep_minutes', label: 'Sleep background tabs', desc: 'Frees memory; the tab reloads when you return', type: 'select', num: true, opts: [[0, 'Never'], [5, 'After 5 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour']] },
-  ]],
-  ['Mods', [
-    { k: 'ui_css', label: 'Custom CSS for the browser', desc: 'Applied live. Try: :root { --r: 22px }', type: 'code' },
-    { type: 'buttons', items: [['openMods', 'folder', 'Open mods folder'], ['reloadMods', 'refresh', 'Reload mods']] },
-    { type: 'note', text: () => `Put .css files in mods\\ui to theme the browser, and <domain>.css / .js in mods\\sites to change websites. Folder: ${S.modsDir}` },
-  ]],
+const F = {
+  adblock: { k: 'adblock', label: 'Block ads & trackers', desc: () => S.shieldReady ? 'EasyList, EasyPrivacy and Peter Lowe\'s list' : 'Downloading filter lists...', type: 'toggle' },
+  tracking: { k: 'tracking', label: 'Tracking prevention', desc: 'Built into the engine; Strict may break some sites', type: 'select', opts: [['strict', 'Strict'], ['balanced', 'Balanced'], ['basic', 'Basic'], ['off', 'Off']] },
+  updateLists: { type: 'buttons', items: [['updateLists', 'refresh', 'Update filter lists']] },
+};
+const SECTIONS = [
+  { id: 'appearance', icon: 'palette', title: 'Appearance', groups: [
+    ['Theme', [
+      { k: 'theme', label: 'Mode', type: 'seg', opts: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] },
+      { k: 'accent', label: 'Accent color', type: 'color' },
+    ]],
+    ['Glass', [
+      { k: 'backdrop', label: 'Backdrop', type: 'seg', opts: [['blur', 'Blur'], ['acrylic', 'Acrylic'], ['mica', 'Mica'], ['none', 'Solid']], hint: backdropHint },
+      { k: 'tint', label: 'Background opacity', desc: 'Lower shows more of what is behind the window', type: 'range', min: 0, max: 100, unit: '%' },
+      { k: 'window_opacity', label: 'Window opacity', desc: 'Fades the whole window, websites included', type: 'range', min: 20, max: 100, unit: '%' },
+    ]],
+    ['Layout', [
+      { k: 'radius', label: 'Roundness', type: 'range', min: 0, max: 24, unit: 'px' },
+      { k: 'compact', label: 'Compact layout', desc: 'Tabs and address bar share one row', type: 'toggle' },
+      { k: 'rounded_pages', label: 'Rounded page corners', type: 'toggle' },
+      { k: 'reduce_motion', label: 'Reduce motion', desc: 'Turn off animations', type: 'toggle' },
+    ]],
+  ] },
+  { id: 'start', icon: 'grid', title: 'Start page', groups: [
+    ['Favourites', [{ type: 'shortcuts' }]],
+    ['Removed sites', [{ type: 'hidden' }]],
+    ['Show', [{ k: 'show_clock', label: 'Clock and date', type: 'toggle' }]],
+  ] },
+  { id: 'browsing', icon: 'globe', title: 'Browsing', groups: [
+    ['Search', [{ k: 'search', label: 'Search engine', desc: 'Used when you type words in the address bar', type: 'select', opts: Object.entries(ENGINES) }]],
+    ['Startup', [
+      { k: 'restore_session', label: 'Reopen last session\'s tabs', type: 'toggle' },
+      { k: 'homepage', label: 'Home button opens', desc: 'Leave empty for the start page', type: 'text', placeholder: 'Start page' },
+    ]],
+  ] },
+  { id: 'privacy', icon: 'shield', title: 'Privacy & trackers', groups: [
+    ['Blocking', [F.adblock, { type: 'allow' }, F.updateLists]],
+    ['Tracking', [F.tracking]],
+    ['Clear browsing data', [{ type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] }]],
+  ] },
+  { id: 'data', icon: 'database', title: 'Your data', groups: [
+    ['Import from browsers on this PC', [{ type: 'importPC' }]],
+    ['Import from your Google account', [{ type: 'importGoogle' }]],
+    ['Passwords & forms', [
+      { k: 'save_passwords', label: 'Offer to save passwords', desc: "Saved in Lurt's profile on this PC", type: 'toggle' },
+      { k: 'autofill', label: 'Autofill forms', desc: 'Addresses and other details you type', type: 'toggle' },
+    ]],
+  ] },
+  { id: 'performance', icon: 'bolt', title: 'Performance', groups: [
+    ['Memory', [{ k: 'sleep_minutes', label: 'Sleep background tabs', desc: 'Frees memory; the tab reloads when you return', type: 'select', num: true, opts: [[0, 'Never'], [5, 'After 5 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour']] }]],
+  ] },
+  { id: 'mods', icon: 'code', title: 'Mods', groups: [
+    ['Browser style', [{ k: 'ui_css', label: 'Custom CSS', desc: 'Applied live. Try: :root { --r: 22px }', type: 'code' }]],
+    ['Mods folder', [
+      { type: 'note', text: () => `Put .css files in mods\\ui to theme the browser, and <domain>.css / .js in mods\\sites to change websites. Folder: ${S.modsDir}` },
+      { type: 'buttons', items: [['openMods', 'folder', 'Open mods folder'], ['reloadMods', 'refresh', 'Reload mods']] },
+    ]],
+  ] },
+  { id: 'about', icon: 'info', title: 'About', groups: [
+    ['', [{ type: 'about' }]],
+    ['Keyboard shortcuts', [{ type: 'keys' }]],
+  ] },
 ];
+S.setSec = 'appearance';
+const settingsOpen = () => S.overlay === 'settings-open';
+function openSettings(sec) {
+  if (sec) S.setSec = sec;
+  hideMenu();
+  if (S.overlay === 'shield-open') closeShield(false);
+  if (S.overlay === 'omni-open') addr.blur();
+  if (!settingsOpen()) openOverlay('settings-open');
+  renderSetNav();
+  renderSettings(true);
+  if (S.setSec === 'data') send({ t: 'importSources' });
+}
+function closeSettings() { if (settingsOpen()) closeOverlay(false); }
+function renderSetNav() {
+  $('#set-tabs').innerHTML = SECTIONS.map((s) =>
+    `<button data-sec="${s.id}" class="${s.id === S.setSec ? 'on' : ''}">${icon(s.icon)}${esc(s.title)}</button>`).join('');
+}
+$('#set-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sec]'); if (!b || b.dataset.sec === S.setSec) return;
+  openSettings(b.dataset.sec);
+});
+$('#set-close').innerHTML = icon('x');
+$('#set-close').onclick = () => closeSettings();
 function backdropHint() {
   const want = S.settings.backdrop;
   if (want === 'mica' && S.backdrop !== 'mica') return 'Mica needs Windows 11. Using Blur instead.';
@@ -623,22 +806,61 @@ function backdropHint() {
   return '';
 }
 const val = (f) => (typeof f === 'function' ? f() : f) || '';
-
-function renderSettings() {
-  const s = S.settings; if (!s) return;
+function groupsHtml(groups, s) {
   let html = '';
-  for (const [sec, items] of SCHEMA) {
-    html += `<div class="sec"><h3>${sec}</h3>`;
-    for (const it of items) html += field(it, s);
-    html += '</div>';
+  for (const [title, items] of groups) {
+    const inner = items.map((it) => field(it, s)).join('');
+    if (!inner) continue;
+    html += `<div class="grp">${title ? `<h4>${esc(title)}</h4>` : ''}<div class="card">${inner}</div></div>`;
   }
-  html += `<div class="hint" style="padding:0 12px 16px">Lurt 0.1 · Shortcuts: Ctrl+T, Ctrl+W, Ctrl+L, Ctrl+Tab, Ctrl+D, Ctrl+H, Ctrl+Shift+T</div>`;
-  const body = $('#side-body');
-  const top = body.scrollTop;
-  body.innerHTML = html;
-  body.scrollTop = top;
-  body.querySelectorAll('.seg').forEach(movePill);
+  return html;
 }
+// Re-render whichever settings views are open (the window and/or the Trackers panel).
+function renderSettings(top) {
+  const s = S.settings; if (!s) return;
+  if (settingsOpen()) {
+    const sec = SECTIONS.find((x) => x.id === S.setSec) || SECTIONS[0];
+    $('#set-h').textContent = sec.title;
+    const body = $('#set-body');
+    const y = top ? 0 : body.scrollTop;
+    let html = groupsHtml(sec.groups, s);
+    if (sec.id === 'data') {
+      if (S.importing) html = `<div class="status"><i class="spin"></i>Importing from ${esc(S.importing)}…</div>` + html;
+      else if (S.importMsg) html = `<div class="status">${icon('info')}${esc(S.importMsg)}</div>` + html;
+    }
+    body.innerHTML = html;
+    body.scrollTop = y;
+    body.querySelectorAll('.seg').forEach(movePill);
+  }
+  if (S.panel === 'trackers') renderTrackers();
+}
+function renderTrackers() {
+  const s = S.settings; if (!s || S.panel !== 'trackers') return;
+  if ($('#side').contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
+  const t = cur(); const host = hostOf(t?.url || '');
+  const on = s.adblock && !S.allowed;
+  const info = S.shieldInfo && S.shieldInfo.id === S.active ? S.shieldInfo : null;
+  const n = on && t ? t.blocked : 0;
+  let h = `<div class="trk-top${on ? '' : ' off'}">${icon(on ? 'shield' : 'shieldOff')}<div><strong>${n}</strong><span>` +
+    (!host ? 'Open a website to see what gets blocked' : !s.adblock ? 'Blocking is off' : S.allowed ? `Paused on ${esc(host)}` : `blocked on ${esc(host)}`) + `</span></div></div>`;
+  let card = field(F.adblock, s);
+  if (host && s.adblock) card += `<label class="set"><div class="lbl"><b>Block on this site</b><small>${S.allowed ? 'Paused, ads will show here' : 'Turn off if the site breaks'}</small></div>` +
+    `<span class="switch"><input type="checkbox" data-a="site" ${on ? 'checked' : ''}><i></i></span></label>`;
+  h += `<div class="card">${card}</div>`;
+  if (on && host) {
+    h += `<div class="grp"><h4>Blocked on this page</h4>`;
+    if (!info) h += `<div class="hint" style="padding:0 10px">Loading...</div>`;
+    else if (!info.items.length) h += `<div class="hint" style="padding:0 10px">Nothing blocked yet. Trackers that load later show up here.</div>`;
+    else h += `<div class="card">${blockedList(info)}</div>`;
+    h += `</div>`;
+  }
+  h += groupsHtml([['Paused sites', [{ type: 'allow' }]], ['Engine', [F.tracking, F.updateLists]]], s);
+  h += `<div class="btns" style="padding:14px 4px"><button class="btn" data-settings="privacy">${icon('gear')}All privacy settings</button></div>`;
+  const body = $('#side-body'); const y = body.scrollTop;
+  body.innerHTML = h; body.scrollTop = y;
+}
+const KEYS = [['New tab', 'Ctrl T'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
+  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks', 'Ctrl Shift B'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
 function field(it, s) {
   const label = `<div class="lbl"><b>${esc(it.label)}</b>${it.desc ? `<small>${esc(val(it.desc))}</small>` : ''}</div>`;
   switch (it.type) {
@@ -656,7 +878,7 @@ function field(it, s) {
         `<input type="range" data-k="${it.k}" min="${it.min}" max="${it.max}" value="${s[it.k]}" style="--p:${p}%" data-unit="${it.unit}"></div>`;
     }
     case 'select':
-      return `<div class="set">${label}<select class="field" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
+      return `<div class="set">${label}<select class="field" style="width:auto;min-width:150px" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
         it.opts.map(([v, l]) => `<option value="${v}" ${String(s[it.k]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('') + '</select></div>';
     case 'text':
       return `<div class="set col">${label}<input class="field" data-k="${it.k}" value="${esc(s[it.k])}" placeholder="${esc(it.placeholder || '')}" spellcheck="false"></div>`;
@@ -673,32 +895,54 @@ function field(it, s) {
         `<button class="btn${danger ? ' danger' : ''}" data-act="${act}">${icon(ic)}${esc(l)}</button>`).join('') + '</div>';
     case 'allow': {
       if (!s.adblock_allow.length) return '';
-      return `<div class="set col"><div class="lbl"><small>Paused on these sites</small></div><div class="chips">` +
+      return `<div class="set col"><div class="lbl"><small>Blocking is paused on these sites</small></div><div class="chips">` +
         s.adblock_allow.map((h) => `<span>${esc(h)}<button data-unallow="${esc(h)}" title="Resume blocking">${icon('x')}</button></span>`).join('') + '</div></div>';
     }
-    case 'import': {
-      const src = S.sources || [];
-      const busy = S.importing;
-      let h = `<div class="set col"><div class="lbl"><b>Import bookmarks & history</b><small>` +
-        (src.length ? 'From browsers on this PC:' : 'No other browsers found on this PC.') + '</small></div>';
-      if (src.length) {
-        h += '<div class="btns" style="padding:0">' +
-          (src.length > 1 ? `<button class="btn" data-import="*" data-label="all browsers" ${busy ? 'disabled' : ''}>${icon('arrow')}Import all (${src.length} profiles)</button>` : '') +
-          src.map((x) => {
-          const label = x.profile ? `${x.browser} · ${x.profile}` : x.browser;
-          return `<button class="btn" data-import="${esc(x.id)}" data-label="${esc(label)}" ${busy ? 'disabled' : ''}>${icon('arrow')}${esc(label)}</button>`;
-        }).join('') + '</div>';
-      }
-      h += `<div class="lbl" style="margin-top:6px"><small>From your Google account: export <b>Chrome</b> data at Google Takeout, then import <code>BrowserHistory.json</code> and <code>Bookmarks.html</code>. Any browser's bookmarks .html export works too.</small></div>` +
-        `<div class="btns" style="padding:0"><button class="btn" data-open="https://takeout.google.com/settings/takeout/custom/chrome">${icon('globe')}Open Google Takeout</button>` +
-        `<label class="btn" ${busy ? 'style="opacity:.5;pointer-events:none"' : ''}>${icon('folder')}Import a file<input type="file" id="import-file" accept=".json,.html,.htm" multiple hidden></label></div>`;
-      if (busy) h += `<div class="hint"><i class="spin" style="display:inline-block;vertical-align:-3px;margin-right:6px"></i>Importing from ${esc(busy)}…</div>`;
-      else if (S.importMsg) h += `<div class="hint">${esc(S.importMsg)}</div>`;
-      h += `<div class="hint">Passwords and signed-in sessions can't be copied: Chrome encrypts them so only Chrome can read them. Sign in once in Lurt and it remembers you.</div>`;
-      return h + '</div>';
+    case 'shortcuts': {
+      const list = s.shortcuts || [];
+      let h = list.map((p, i) => `<div class="lrow"><span class="fav">${letter(p.url, p.title)}</span>` +
+        `<div class="txt"><span class="t">${esc(p.title || hostOf(p.url))}</span><span class="u">${esc(pretty(p.url))}</span></div>` +
+        `<button class="icon sm" data-sc-edit="${i}" title="Edit">${icon('edit')}</button>` +
+        `<button class="icon sm" data-sc-del="${i}" title="Remove">${icon('trash')}</button></div>`).join('');
+      if (!list.length) h += `<div class="hint">Pin your own sites to the start page. You can also right-click any tile there.</div>`;
+      return h + `<div class="btns"><button class="btn" data-sc-add>${icon('plus')}Add a favourite</button></div>`;
     }
+    case 'hidden': {
+      const list = s.hidden_tiles || [];
+      if (!list.length) return `<div class="hint">Sites you remove from the start page show up here, so you can bring them back.</div>`;
+      return `<div class="set col"><div class="chips">` +
+        list.map((h) => `<span>${esc(h)}<button data-unhide="${esc(h)}" title="Show on the start page again">${icon('x')}</button></span>`).join('') + '</div></div>' +
+        `<div class="btns"><button class="btn" data-unhide="*">${icon('eye')}Show all again</button></div>`;
+    }
+    case 'importPC': {
+      const src = S.sources;
+      const busy = !!S.importing;
+      if (!src) return `<div class="hint">Looking for browsers...</div>`;
+      if (!src.length) return `<div class="hint">No Chrome, Edge, Brave, Vivaldi or Opera profiles found on this PC.</div>`;
+      let h = `<div class="lrow"><div class="txt"><span class="t">Bookmarks and history</span><span class="u">${src.length} ${src.length === 1 ? 'profile' : 'profiles'} found. Importing again won't create duplicates.</span></div>` +
+        (src.length > 1 ? `<button class="btn sm primary" data-import="*" data-label="all browsers" ${busy ? 'disabled' : ''}>Import all</button>` : '') + `</div>`;
+      h += src.map((x) => {
+        const label = x.profile ? `${x.browser} · ${x.profile}` : x.browser;
+        return `<div class="lrow"><span class="fav">${letter('https://' + x.browser.toLowerCase() + '.app', x.browser)}</span><div class="txt"><span class="t">${esc(x.browser)}</span><span class="u">${esc(x.profile || 'Default profile')}</span></div>` +
+          `<button class="btn sm" data-import="${esc(x.id)}" data-label="${esc(label)}" ${busy ? 'disabled' : ''}>${icon('download')}Import</button></div>`;
+      }).join('');
+      return h;
+    }
+    case 'importGoogle': {
+      const busy = !!S.importing;
+      return `<ol class="steps"><li>Open <b>Google Takeout</b> and export your <b>Chrome</b> data.</li>` +
+        `<li>Unzip the download.</li><li>Import <b>BrowserHistory.json</b> and <b>Bookmarks.html</b> from it. Any browser's bookmarks .html works too.</li></ol>` +
+        `<div class="btns"><button class="btn" data-open="https://takeout.google.com/settings/takeout/custom/chrome">${icon('external')}Open Google Takeout</button>` +
+        `<label class="btn" ${busy ? 'style="opacity:.5;pointer-events:none"' : ''}>${icon('folder')}Import files<input type="file" id="import-file" accept=".json,.html,.htm" multiple hidden></label></div>` +
+        `<div class="hint">Passwords and signed-in sessions can't be copied: Chrome encrypts them so only Chrome can read them. Sign in once in Lurt and it remembers you.</div>`;
+    }
+    case 'about':
+      return `<div class="about"><span class="logo">${icon('sparkle')}</span><div><b>Lurt 0.1.0</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
+        `<div class="btns"><button class="btn" data-open="https://github.com/ladroxd/Lurt">${icon('external')}Project page</button><button class="btn" data-open="https://github.com/ladroxd/Lurt/releases">${icon('download')}Releases</button></div>`;
+    case 'keys':
+      return `<div class="keys">` + KEYS.map(([a, k]) => `<span>${esc(a)}</span><kbd>${esc(k)}</kbd>`).join('') + `</div>`;
     case 'note':
-      return `<div class="hint" style="padding:6px 6px 0">${esc(val(it.text))}</div>`;
+      return `<div class="hint">${esc(val(it.text))}</div>`;
   }
   return '';
 }
@@ -707,62 +951,79 @@ let saveT;
 function setSetting(k, v, { lazy = false, rerender = false } = {}) {
   S.settings[k] = v;
   applyLook();
+  if (k === 'shortcuts' || k === 'hidden_tiles') renderTiles();
   clearTimeout(saveT);
   saveT = setTimeout(() => send({ t: 'settings', s: S.settings }), lazy ? 300 : 0);
   if (rerender) renderSettings();
 }
-const side = $('#side-body');
-side.addEventListener('change', (e) => {
-  if (e.target.id === 'import-file') {
-    for (const f of e.target.files) {
-      S.importing = f.name; S.importMsg = '';
-      f.text().then((text) => send({ t: 'importFile', name: f.name, text }));
+// Both the settings window and the Trackers panel use the same controls.
+function bindSettings(el, active, ownActions) {
+  el.addEventListener('change', (e) => {
+    if (!active()) return;
+    if (e.target.id === 'import-file') {
+      for (const f of e.target.files) {
+        S.importing = f.name; S.importMsg = '';
+        f.text().then((text) => send({ t: 'importFile', name: f.name, text }));
+      }
+      renderSettings();
+      return;
     }
-    renderSettings();
-    return;
-  }
-  const el = e.target; const k = el.dataset.k; if (!k || S.panel !== 'settings') return;
-  if (el.type === 'checkbox') setSetting(k, el.checked, { rerender: k === 'adblock' });
-  else if (el.tagName === 'SELECT') setSetting(k, el.hasAttribute('data-num') ? +el.value : el.value);
-  else if (el.type === 'color') setSetting(k, el.value, { rerender: true });
-  else if (el.type === 'range') setSetting(k, +el.value);
-});
-side.addEventListener('input', (e) => {
-  const el = e.target; const k = el.dataset.k; if (!k || S.panel !== 'settings') return;
-  if (el.type === 'range') {
-    el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min)) * 100 + '%');
-    el.parentElement.querySelector('.val').textContent = el.value + el.dataset.unit;
-    setSetting(k, +el.value, { lazy: true });
-  } else if (el.tagName === 'TEXTAREA' || el.type === 'text') {
-    setSetting(k, el.value, { lazy: true });
-  } else if (el.type === 'color') {
-    setSetting(k, el.value, { lazy: true });
-  }
-});
-side.addEventListener('click', (e) => {
-  if (S.panel !== 'settings') return;
-  const segBtn = e.target.closest('.seg[data-k] button');
-  if (segBtn) {
-    const seg = segBtn.parentElement;
-    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === segBtn));
-    movePill(seg);
-    setSetting(seg.dataset.k, segBtn.dataset.v, { rerender: seg.dataset.k === 'backdrop' });
-    return;
-  }
-  const sw = e.target.closest('.sw[data-color]');
-  if (sw) { setSetting('accent', sw.dataset.color, { rerender: true }); return; }
-  const imp = e.target.closest('[data-import]');
-  if (imp) {
-    S.importing = imp.dataset.label; S.importMsg = '';
-    send({ t: 'importProfile', id: imp.dataset.import, label: imp.dataset.label });
-    renderSettings();
-    return;
-  }
-  const op = e.target.closest('[data-open]');
-  if (op) { send({ t: 'open', url: op.dataset.open, newTab: true }); return; }
-  const un = e.target.closest('[data-unallow]');
-  if (un) { setSetting('adblock_allow', S.settings.adblock_allow.filter((h) => h !== un.dataset.unallow), { rerender: true }); }
-});
+    if (e.target.dataset.a === 'site') { send({ t: 'shield' }); return; }
+    const t = e.target; const k = t.dataset.k; if (!k) return;
+    if (t.type === 'checkbox') setSetting(k, t.checked, { rerender: k === 'adblock' });
+    else if (t.tagName === 'SELECT') setSetting(k, t.hasAttribute('data-num') ? +t.value : t.value);
+    else if (t.type === 'color') setSetting(k, t.value, { rerender: true });
+    else if (t.type === 'range') setSetting(k, +t.value);
+  });
+  el.addEventListener('input', (e) => {
+    if (!active()) return;
+    const t = e.target; const k = t.dataset.k; if (!k) return;
+    if (t.type === 'range') {
+      t.style.setProperty('--p', ((t.value - t.min) / (t.max - t.min)) * 100 + '%');
+      t.closest('.set').querySelector('.val').textContent = t.value + t.dataset.unit;
+      setSetting(k, +t.value, { lazy: true });
+    } else if (t.tagName === 'TEXTAREA' || t.type === 'text' || t.type === 'color') {
+      setSetting(k, t.value, { lazy: true });
+    }
+  });
+  el.addEventListener('click', (e) => {
+    if (!active()) return;
+    const q = (sel) => e.target.closest(sel);
+    if (ownActions && q('[data-act]')) { runAction(q('[data-act]')); return; }
+    const segBtn = q('.seg[data-k] button');
+    if (segBtn) {
+      const seg = segBtn.parentElement;
+      seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === segBtn));
+      movePill(seg);
+      setSetting(seg.dataset.k, segBtn.dataset.v, { rerender: seg.dataset.k === 'backdrop' });
+      return;
+    }
+    const sw = q('.sw[data-color]');
+    if (sw) { setSetting('accent', sw.dataset.color, { rerender: true }); return; }
+    const imp = q('[data-import]');
+    if (imp) {
+      S.importing = imp.dataset.label; S.importMsg = '';
+      send({ t: 'importProfile', id: imp.dataset.import, label: imp.dataset.label });
+      renderSettings();
+      return;
+    }
+    const op = q('[data-open]');
+    if (op) { closeSettings(); send({ t: 'open', url: op.dataset.open, newTab: true }); return; }
+    const go = q('[data-settings]');
+    if (go) { openSettings(go.dataset.settings); return; }
+    const un = q('[data-unallow]');
+    if (un) { setSetting('adblock_allow', S.settings.adblock_allow.filter((h) => h !== un.dataset.unallow), { rerender: true }); return; }
+    const uh = q('[data-unhide]');
+    if (uh) { const h = uh.dataset.unhide; setSetting('hidden_tiles', h === '*' ? [] : S.settings.hidden_tiles.filter((x) => x !== h), { rerender: true }); return; }
+    if (q('[data-sc-add]')) { editTile(null); return; }
+    const ed = q('[data-sc-edit]');
+    if (ed) { const p = S.settings.shortcuts[+ed.dataset.scEdit]; editTile({ ...p, pinned: true }); return; }
+    const del = q('[data-sc-del]');
+    if (del) { removePin(S.settings.shortcuts[+del.dataset.scDel].url); }
+  });
+}
+bindSettings($('#set-body'), settingsOpen, true);
+bindSettings($('#side-body'), () => S.panel === 'trackers', false);
 
 // ---- keyboard --------------------------------------------------------------
 const FORWARD = new Set(['ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+shift+t',
@@ -774,7 +1035,10 @@ addEventListener('keydown', (e) => {
   if (c === 'ctrl+l' || c === 'alt+d' || c === 'f6') { e.preventDefault(); addr.focus(); addr.select(); return; }
   if (c === 'ctrl+h') { e.preventDefault(); togglePanel('history'); return; }
   if (c === 'ctrl+shift+b') { e.preventDefault(); togglePanel('bookmarks'); return; }
-  if (c === 'ctrl+comma') { e.preventDefault(); togglePanel('settings'); return; }
+  if (c === 'ctrl+comma') { e.preventDefault(); settingsOpen() ? closeSettings() : openSettings(); return; }
+  if (c === 'escape' && document.body.classList.contains('ctx-open')) { hideMenu(); return; }
+  if (c === 'escape' && settingsOpen() && !document.body.classList.contains('dlg-open')) { closeSettings(); return; }
+  if (settingsOpen() || document.body.classList.contains('dlg-open')) return;
   if (c === 'f5' || c === 'ctrl+r') { e.preventDefault(); send({ t: 'nav', a: 'reload' }); return; }
   if (c === 'alt+arrowleft') { e.preventDefault(); send({ t: 'nav', a: 'back' }); return; }
   if (c === 'alt+arrowright') { e.preventDefault(); send({ t: 'nav', a: 'forward' }); return; }

@@ -713,7 +713,8 @@ impl App {
     fn send_list(&self, kind: &str, q: &str) {
         let items = match kind {
             "history" => self.store.history(q, 300),
-            "top" => self.store.top_sites(8),
+            // Extra candidates so the UI can skip hidden and pinned sites.
+            "top" => self.store.top_sites(40),
             _ => self.store.bookmarks(),
         };
         self.send(json!({ "t": "list", "kind": kind, "items": items }));

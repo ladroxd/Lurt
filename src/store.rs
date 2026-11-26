@@ -46,6 +46,17 @@ pub struct Settings {
     pub save_passwords: bool,
     /// Autofill addresses and other form data.
     pub autofill: bool,
+    /// Favourites pinned to the start page, in order.
+    pub shortcuts: Vec<Shortcut>,
+    /// Sites (hosts) removed from the start page's most-visited tiles.
+    pub hidden_tiles: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(default)]
+pub struct Shortcut {
+    pub title: String,
+    pub url: String,
 }
 
 impl Default for Settings {
@@ -71,6 +82,8 @@ impl Default for Settings {
             ui_css: String::new(),
             save_passwords: true,
             autofill: true,
+            shortcuts: Vec::new(),
+            hidden_tiles: Vec::new(),
         }
     }
 }

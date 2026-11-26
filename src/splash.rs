@@ -345,7 +345,7 @@ fn paint(w: i32, h: i32, look: &Look) -> (Vec<u32>, Vec<u8>) {
         row_y = 42.0 * s;
         omni_x0 = 8.0 * s + nav_w + 6.0 * s;
         // The address bar's grid column ends where the window buttons column begins.
-        let end = fw - 149.0 * s;
+        let end = fw - 184.0 * s;
         let avail = (end - omni_x0).max(0.0);
         let ow = avail.min(920.0 * s);
         let ox = omni_x0 + (avail - ow) / 2.0;
