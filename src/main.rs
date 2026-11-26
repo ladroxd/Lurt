@@ -5,12 +5,15 @@
 
 mod blocker;
 mod glass;
+mod importer;
+mod splash;
 mod store;
 mod tabs;
 mod util;
 
 use std::{
     rc::Rc,
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -20,7 +23,7 @@ use tao::{
     dpi::LogicalSize as WinSize,
     event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    platform::windows::WindowBuilderExtWindows,
+    platform::windows::{WindowBuilderExtWindows, WindowExtWindows},
     window::{Fullscreen, ResizeDirection, Window, WindowBuilder},
 };
 use wry::{
@@ -53,6 +56,8 @@ pub enum Ev {
     /// (serialized engine, freshly downloaded?)
     ShieldReady(Vec<u8>, bool),
     ShieldFailed,
+    /// Import finished: (bookmarks added, history entries merged) or an error.
+    Imported(Result<(usize, usize), String>, String),
 }
 
 const UI_HTML: &str = include_str!("../ui/index.html");
@@ -88,12 +93,30 @@ struct App {
     quit: bool,
 }
 
+/// `LURT_BENCH=1` prints startup timings to stderr, never shows the window,
+/// writes nothing to the user's session, and exits once the first page has loaded.
+fn bench() -> bool {
+    static B: OnceLock<bool> = OnceLock::new();
+    *B.get_or_init(|| std::env::var_os("LURT_BENCH").is_some())
+}
+
+static T0: OnceLock<Instant> = OnceLock::new();
+
+pub fn mark(label: &str) {
+    if bench() {
+        let t = T0.get_or_init(Instant::now).elapsed();
+        eprintln!("{:>6.1} ms  {label}", t.as_secs_f64() * 1000.0);
+    }
+}
+
 fn main() {
+    T0.get_or_init(Instant::now);
     let event_loop = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
     let store = Store::open();
     let settings = store.load_settings();
+    mark("store + settings loaded");
 
     // Open at a comfortable size that always fits the screen, centered.
     let (mut w, mut h, mut x, mut y) = (1280.0, 820.0, None, None);
@@ -118,7 +141,45 @@ fn main() {
         builder = builder.with_position(tao::dpi::LogicalPosition::new(x.max(0.0), y.max(0.0)));
     }
     let window = builder.build(&event_loop).expect("window");
+    mark("window created");
     let backdrop = glass::apply(&window, &settings.backdrop);
+    mark("backdrop applied");
+
+    // Show the window right away with a skeleton of the UI; the WebView2 engine
+    // starts underneath it (0.3 s warm, a few seconds on the first launch after boot).
+    let early = !bench() && std::env::var_os("LURT_NO_SPLASH").is_none();
+    if early {
+        window.set_visible(true);
+        let dark = match settings.theme.as_str() {
+            "dark" => true,
+            "light" => false,
+            _ => splash::system_dark(),
+        };
+        let session = store.load_session();
+        let has_arg = std::env::args().skip(1).any(|a| !a.starts_with("--"));
+        let blank = !has_arg
+            && (!settings.restore_session
+                || session.tabs.get(session.active).is_none_or(|t| t.url.is_empty()));
+        let pos = window.inner_position().unwrap_or_default();
+        let size = window.inner_size();
+        let tint = if backdrop == "none" { 1.0 } else { 0.12 + f32::from(settings.tint) / 100.0 * 0.86 };
+        splash::show(
+            windows::Win32::Foundation::HWND(window.hwnd() as _),
+            pos.x,
+            pos.y,
+            size.width as i32,
+            size.height as i32,
+            &splash::Look {
+                dark,
+                tint,
+                radius: f32::from(settings.radius),
+                compact: settings.compact,
+                blank,
+                scale: window.scale_factor() as f32,
+            },
+        );
+        mark("skeleton shown");
+    }
 
     let mut ctx = WebContext::new(Some(Store::webview_dir()));
     let page = UI_HTML.replace("/*CSS*/", UI_CSS).replace("/*JS*/", UI_JS);
@@ -141,6 +202,7 @@ fn main() {
         .with_scroll_bar_style(wry::ScrollBarStyle::FluentOverlay)
         .build_as_child(&window)
         .expect("WebView2 runtime");
+    mark("UI webview created (WebView2 engine up)");
 
     tabs::set_tracking(&chrome, &settings.tracking);
 
@@ -174,9 +236,13 @@ fn main() {
     let mut next_tick = Instant::now() + Duration::from_secs(1);
     event_loop.run(move |event, _, cf| {
         match event {
+            Event::NewEvents(StartCause::Init) => mark("event loop running"),
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                app.tick();
-                next_tick = Instant::now() + Duration::from_secs(if app.ui_ready { 60 } else { 1 });
+                app.reveal_due();
+                if Instant::now() >= next_tick {
+                    app.tick();
+                    next_tick = Instant::now() + Duration::from_secs(if app.ui_ready { 60 } else { 1 });
+                }
             }
             Event::UserEvent(ev) => app.on_event(ev),
             Event::WindowEvent { event, .. } => match event {
@@ -189,7 +255,8 @@ fn main() {
             },
             _ => {}
         }
-        *cf = ControlFlow::WaitUntil(next_tick);
+        let wake = app.tabs.iter().filter_map(|t| t.reveal_by).min().map_or(next_tick, |r| r.min(next_tick));
+        *cf = ControlFlow::WaitUntil(wake);
         if app.quit {
             app.save_session();
             *cf = ControlFlow::Exit;
@@ -233,6 +300,7 @@ impl App {
                     "id": t.id, "title": t.title, "url": t.url, "fav": t.fav,
                     "loading": t.loading, "blocked": t.blocked,
                     "asleep": t.view.is_none() && !t.url.is_empty(),
+                    "shown": t.view.is_some() && t.shown,
                 })
             })
             .collect();
@@ -348,6 +416,9 @@ impl App {
     }
 
     fn save_session(&self) {
+        if bench() {
+            return;
+        }
         let tabs = self
             .tabs
             .iter()
@@ -361,7 +432,6 @@ impl App {
     fn wake(&mut self, id: u32) {
         let vp = self.viewport();
         let theme = theme_of(&self.settings.theme);
-        let visible = id == self.active && !self.overlay;
         let Some(idx) = self.tabs.iter().position(|t| t.id == id) else { return };
         if self.tabs[idx].view.is_some() || self.tabs[idx].url.is_empty() {
             return;
@@ -369,17 +439,59 @@ impl App {
         let url = self.tabs[idx].url.clone();
         let view = tabs::create(
             id,
-            ViewOpts { url: &url, bounds: vp, visible, theme },
+            ViewOpts { url: &url, bounds: vp, visible: false, theme },
             &mut self.ctx,
             &self.window,
             &self.proxy,
             &self.shield,
         );
+        mark("page view created");
+        if let Some(v) = &view {
+            tabs::set_autofill(v, self.settings.save_passwords, self.settings.autofill);
+        }
         let t = &mut self.tabs[idx];
         t.view = view;
         t.loading = t.view.is_some();
         t.blocked = 0;
+        t.shown = false;
+        t.reveal_by = t.view.is_some().then(|| Instant::now() + Duration::from_millis(2500));
         self.layout_tabs();
+    }
+
+    /// The page has content: swap the skeleton for the real view.
+    fn reveal(&mut self, id: u32) {
+        let active = id == self.active && !self.overlay;
+        let Some(t) = self.tab_mut(id) else { return };
+        t.reveal_by = None;
+        if t.shown {
+            return;
+        }
+        t.shown = true;
+        if active {
+            if let Some(v) = &t.view {
+                let _ = v.set_visible(true);
+                let _ = v.focus();
+            }
+        }
+        self.push_state();
+    }
+
+    fn reveal_due(&mut self) {
+        let now = Instant::now();
+        let due: Vec<u32> = self.tabs.iter().filter(|t| t.reveal_by.is_some_and(|r| r <= now)).map(|t| t.id).collect();
+        for id in due {
+            self.reveal(id);
+        }
+    }
+
+    /// Show the active tab's view if it is ready to be seen.
+    fn show_active(&self) {
+        if let Some(t) = self.tab(self.active) {
+            if let (Some(v), true) = (&t.view, t.shown) {
+                let _ = v.set_visible(true);
+                let _ = v.focus();
+            }
+        }
     }
 
     fn new_tab(&mut self, url: Option<String>, next_to_active: bool) -> u32 {
@@ -424,9 +536,8 @@ impl App {
         }
         if let Some(v) = self.active_view() {
             let _ = v.set_memory_usage_level(MemoryUsageLevel::Normal);
-            let _ = v.set_visible(true);
-            let _ = v.focus();
         }
+        self.show_active();
         self.push_state();
     }
 
@@ -468,9 +579,8 @@ impl App {
         match &t.view {
             Some(v) => {
                 let _ = v.load_url(&url);
-                let _ = v.set_visible(true);
-                let _ = v.focus();
                 t.loading = true;
+                self.show_active();
             }
             None => {
                 t.url = url;
@@ -493,6 +603,8 @@ impl App {
         let id = self.active;
         if let Some(t) = self.tab_mut(id) {
             t.view = None;
+            t.shown = false;
+            t.reveal_by = None;
             t.url.clear();
             t.title.clear();
             t.fav.clear();
@@ -508,7 +620,10 @@ impl App {
     fn tick(&mut self) {
         if !self.ui_ready && self.started.elapsed() > Duration::from_secs(3) {
             // The UI never reported in; show the window anyway rather than stay invisible.
-            self.window.set_visible(true);
+            if !bench() {
+                self.window.set_visible(true);
+            }
+            splash::dismiss();
             self.ui_ready = true;
         }
         let mins = self.settings.sleep_minutes;
@@ -522,6 +637,8 @@ impl App {
                 {
                     t.view = None;
                     t.loading = false;
+                    t.shown = false;
+                    t.reveal_by = None;
                     slept = true;
                 }
             }
@@ -593,6 +710,13 @@ impl App {
         }
         if old.tracking != s.tracking {
             tabs::set_tracking(&self.chrome, &s.tracking);
+        }
+        if old.save_passwords != s.save_passwords || old.autofill != s.autofill {
+            for t in &self.tabs {
+                if let Some(v) = &t.view {
+                    tabs::set_autofill(v, s.save_passwords, s.autofill);
+                }
+            }
         }
         self.shield.enabled.set(s.adblock);
         *self.shield.allow.borrow_mut() = s.adblock_allow.clone();
@@ -684,6 +808,13 @@ impl App {
                 }
             }
             Ev::Load(id, started, url) => {
+                mark(if started { "page: content loading" } else { "page: load finished" });
+                if bench() && !started {
+                    self.quit = true;
+                }
+                if !started {
+                    self.reveal(id);
+                }
                 let Some(t) = self.tab_mut(id) else { return };
                 t.loading = started;
                 if started {
@@ -757,6 +888,15 @@ impl App {
                 }
             }
             Ev::ShieldFailed => self.toast("Couldn't download filter lists. Blocking is off until it can."),
+            Ev::Imported(result, from) => {
+                let text = match result {
+                    Ok((b, h)) => format!("Imported from {from}: {b} new bookmarks, {h} history entries"),
+                    Err(e) => format!("Import from {from} failed: {e}"),
+                };
+                self.send(json!({ "t": "imported", "text": text }));
+                self.send_list("top", "");
+                self.send_list("bookmarks", "");
+            }
         }
     }
 
@@ -778,7 +918,11 @@ impl App {
                     self.push_state();
                 }
             }
-            "dom" => self.inject_page(id),
+            "dom" => {
+                mark("page: DOM ready");
+                self.inject_page(id);
+                self.reveal(id);
+            }
             _ => {}
         }
     }
@@ -793,7 +937,16 @@ impl App {
                 self.send_settings();
                 self.send(json!({ "t": "mods", "css": self.store.ui_mods() }));
                 self.push_state();
-                self.window.set_visible(true);
+                mark("UI ready (first paint done)");
+                // Safety net: never leave the skeleton up if the "painted" signal is lost.
+                let p = self.proxy.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(1500));
+                    let _ = p.send_event(Ev::Chrome(r#"{"t":"painted"}"#.into()));
+                });
+                if !bench() && !self.window.is_visible() {
+                    self.window.set_visible(true);
+                }
                 let active = self.active;
                 if self.tab(active).is_some_and(|t| t.url.is_empty()) {
                     self.focus_address();
@@ -885,14 +1038,17 @@ impl App {
                 }
                 self.overlay = m["open"].as_bool().unwrap_or(false);
                 if self.overlay {
-                    match self.active_view() {
+                    let ready = self.tab(self.active).is_some_and(|t| t.shown);
+                    match self.active_view().filter(|_| ready) {
                         Some(v) => tabs::snapshot(v, self.active, self.proxy.clone()),
                         None => self.send(json!({ "t": "overlay", "snap": null })),
                     }
-                } else if let Some(v) = self.active_view() {
-                    let _ = v.set_visible(true);
-                    if m["focusPage"].as_bool() == Some(true) {
-                        let _ = v.focus();
+                } else if let Some(t) = self.tab(self.active) {
+                    if let (Some(v), true) = (&t.view, t.shown) {
+                        let _ = v.set_visible(true);
+                        if m["focusPage"].as_bool() == Some(true) {
+                            let _ = v.focus();
+                        }
                     }
                 }
             }
@@ -945,6 +1101,43 @@ impl App {
                 if let Some(v) = self.active_view() {
                     v.open_devtools();
                 }
+            }
+            "importSources" => {
+                self.send(json!({ "t": "sources", "items": importer::detect() }));
+            }
+            "importProfile" | "importFile" => {
+                let (db, scratch, proxy) = (self.store.db_path(), self.store.dir.clone(), self.proxy.clone());
+                let profile = s("t") == "importProfile";
+                let (id, label, name, text) = (s("id"), s("label"), s("name"), s("text"));
+                std::thread::spawn(move || {
+                    let result = if profile && id == "*" {
+                        // Every profile of every browser; report the totals.
+                        let mut total = (0, 0);
+                        let mut err = None;
+                        for src in importer::detect() {
+                            match importer::read_profile(&src.id, &scratch).and_then(|b| importer::save(&db, &b)) {
+                                Ok((b, h)) => {
+                                    total.0 += b;
+                                    total.1 += h;
+                                }
+                                Err(e) => err = Some(format!("{}: {e}", src.browser)),
+                            }
+                        }
+                        match err {
+                            Some(e) if total == (0, 0) => Err(e),
+                            _ => Ok(total),
+                        }
+                    } else if profile {
+                        importer::read_profile(&id, &scratch).and_then(|b| importer::save(&db, &b))
+                    } else {
+                        importer::read_file(&name, &text).and_then(|b| importer::save(&db, &b))
+                    };
+                    let _ = proxy.send_event(Ev::Imported(result, if profile { label } else { name }));
+                });
+            }
+            "painted" => {
+                mark("UI painted, skeleton fading out");
+                splash::dismiss();
             }
             "focusPage" => {
                 if let Some(v) = self.active_view() {

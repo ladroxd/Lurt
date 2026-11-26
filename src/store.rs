@@ -40,6 +40,10 @@ pub struct Settings {
     pub sleep_minutes: u32,
     /// Extra CSS for the browser UI, edited in Settings.
     pub ui_css: String,
+    /// Offer to save passwords you type into sites.
+    pub save_passwords: bool,
+    /// Autofill addresses and other form data.
+    pub autofill: bool,
 }
 
 impl Default for Settings {
@@ -54,7 +58,7 @@ impl Default for Settings {
             reduce_motion: false,
             rounded_pages: true,
             show_clock: true,
-            search: "duckduckgo".into(),
+            search: "google".into(),
             homepage: String::new(),
             restore_session: true,
             adblock: true,
@@ -62,6 +66,8 @@ impl Default for Settings {
             tracking: "balanced".into(),
             sleep_minutes: 30,
             ui_css: String::new(),
+            save_passwords: true,
+            autofill: true,
         }
     }
 }
@@ -105,9 +111,10 @@ fn like(q: &str) -> String {
 
 impl Store {
     pub fn open() -> Self {
-        let dir = dirs::data_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("Lurt");
+        // LURT_DATA points the profile elsewhere (benchmarks, portable installs).
+        let dir = std::env::var_os("LURT_DATA").map(PathBuf::from).unwrap_or_else(|| {
+            dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("Lurt")
+        });
         let _ = fs::create_dir_all(dir.join("mods").join("ui"));
         let _ = fs::create_dir_all(dir.join("mods").join("sites"));
         write_mods_readme(&dir.join("mods"));
@@ -126,6 +133,10 @@ impl Store {
                 url TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);",
         );
         Self { db, dir }
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.dir.join("lurt.db")
     }
 
     pub fn webview_dir() -> PathBuf {

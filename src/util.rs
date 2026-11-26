@@ -3,13 +3,13 @@
 pub fn search_url(engine: &str, q: &str) -> String {
     let enc: String = url::form_urlencoded::byte_serialize(q.as_bytes()).collect();
     let template = match engine {
-        "google" => "https://www.google.com/search?q=%s",
+        "duckduckgo" => "https://duckduckgo.com/?q=%s",
         "bing" => "https://www.bing.com/search?q=%s",
         "brave" => "https://search.brave.com/search?q=%s",
         "startpage" => "https://www.startpage.com/do/search?q=%s",
         "ecosia" => "https://www.ecosia.org/search?q=%s",
         custom if custom.contains("%s") && custom.starts_with("http") => custom,
-        _ => "https://duckduckgo.com/?q=%s",
+        _ => "https://www.google.com/search?q=%s",
     };
     template.replace("%s", &enc)
 }

@@ -1,0 +1,59 @@
+# Builds lurt.exe and attaches it to a draft GitHub release whenever a version tag
+# (e.g. v0.1.0) is pushed. The release text comes from .github/release-notes/<tag>.md
+# (copy TEMPLATE.md to start one). Review the draft on GitHub, then publish it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches Cargo.toml
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            Write-Error "Tag ${{ github.ref_name }} doesn't match Cargo.toml version $version"
+            exit 1
+          }
+
+      - name: Check the release notes exist
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".github/release-notes/${{ github.ref_name }}.md")) {
+            Write-Error "Missing .github/release-notes/${{ github.ref_name }}.md"
+            exit 1
+          }
+
+      - name: Test
+        run: cargo test --release --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item target/release/lurt.exe lurt.exe
+          $hash = (Get-FileHash lurt.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  lurt.exe" | Out-File -Encoding ascii lurt.exe.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: Lurt ${{ github.ref_name }}
+          body_path: .github/release-notes/${{ github.ref_name }}.md
+          files: |
+            lurt.exe
+            lurt.exe.sha256

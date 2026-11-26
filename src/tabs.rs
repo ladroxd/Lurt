@@ -35,6 +35,11 @@ pub struct Tab {
     pub back: bool,
     pub fwd: bool,
     pub last_active: Instant,
+    /// A fresh page view stays hidden (the UI shows a page skeleton) until it has
+    /// content, so you never see a blank white rectangle.
+    pub shown: bool,
+    /// Reveal anyway at this time, for pages that are slow to render.
+    pub reveal_by: Option<Instant>,
 }
 
 impl Tab {
@@ -50,6 +55,8 @@ impl Tab {
             back: false,
             fwd: false,
             last_active: Instant::now(),
+            shown: false,
+            reveal_by: None,
         }
     }
 }
@@ -232,6 +239,16 @@ unsafe fn hook(
         )?;
     }
     Ok(())
+}
+
+/// Password saving and form autofill (WebView2's built-in, stored in the Lurt profile).
+pub fn set_autofill(view: &WebView, passwords: bool, general: bool) {
+    unsafe {
+        if let Ok(s) = view.webview().Settings().and_then(|s| s.cast::<ICoreWebView2Settings4>()) {
+            let _ = s.SetIsPasswordAutosaveEnabled(passwords);
+            let _ = s.SetIsGeneralAutofillEnabled(general);
+        }
+    }
 }
 
 /// Browser-wide tracking prevention, built into WebView2. Applies to the shared profile.

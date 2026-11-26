@@ -14,6 +14,21 @@ cargo run --release                 # build and start
 target\release\lurt.exe github.com  # open a page (or search terms) in a new tab
 ```
 
+## Startup
+
+The window appears in about 30 ms with a shimmering skeleton of the UI, drawn natively while the WebView2 engine starts underneath (0.3 s warm, a few seconds on the first launch after boot), then fades into the real interface. New tabs show a page skeleton instead of a white flash until the site has content.
+
+`LURT_BENCH=1` prints startup timings to stderr without showing a window. `LURT_DATA=<dir>` uses a separate profile.
+
+## Your data
+
+Settings → Your data imports bookmarks and history:
+
+- from Chrome, Edge, Brave, Vivaldi and Opera profiles on this PC (one profile, or all of them at once);
+- from Google Takeout (`BrowserHistory.json`, `Bookmarks.html`) or any bookmarks `.html` export.
+
+Passwords and signed-in sessions can't be imported, because Chromium encrypts them for the browser that saved them. Lurt saves passwords and autofill data itself once you sign in.
+
 ## Shortcuts
 
 | Keys | Action |
@@ -40,6 +55,8 @@ target\release\lurt.exe github.com  # open a page (or search terms) in a new tab
 src/main.rs     window, event loop, tab management, UI <-> Rust messages
 src/tabs.rs     page views + WebView2 hooks (blocking, fullscreen, history, snapshots)
 src/blocker.rs  filter list download / cache / engine
+src/splash.rs   native startup skeleton (per-pixel-alpha window, software-rendered)
+src/importer.rs bookmarks/history import from other browsers and Google Takeout
 src/store.rs    settings.json, SQLite history + bookmarks, session, mods
 src/glass.rs    window backdrop, rounded page corners
 src/content.js  tiny script injected into websites (shortcuts, favicon, DOM-ready)

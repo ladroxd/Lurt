@@ -43,7 +43,7 @@ const S = {
   overlay: false, panel: null, lastPanel: 'bookmarks', rows: [], sel: 0, blank: true,
 };
 const cur = () => S.tabs.find((t) => t.id === S.active);
-const ENGINES = { duckduckgo: 'DuckDuckGo', google: 'Google', bing: 'Bing', brave: 'Brave Search', startpage: 'Startpage', ecosia: 'Ecosia' };
+const ENGINES = { google: 'Google', duckduckgo: 'DuckDuckGo', bing: 'Bing', brave: 'Brave Search', startpage: 'Startpage', ecosia: 'Ecosia' };
 const mq = matchMedia('(prefers-color-scheme: dark)');
 
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -69,6 +69,8 @@ const H = {
   state(m) {
     Object.assign(S, m);
     renderTabs(); renderBar(); renderStart();
+    // First real frame is on screen: let the native startup skeleton fade out.
+    if (!S.painted) { S.painted = true; requestAnimationFrame(() => requestAnimationFrame(() => send({ t: 'painted' }))); }
   },
   settings(m) {
     S.settings = m.s; S.backdrop = m.backdrop; S.shieldReady = m.shield; S.modsDir = m.modsDir;
@@ -94,6 +96,16 @@ const H = {
   panel(m) { togglePanel(m.p); },
   mods(m) { $('#mods-css').textContent = m.css || ''; },
   toast(m) { toast(m.text); },
+  sources(m) {
+    S.sources = m.items;
+    if (S.panel === 'settings' && !$('#side').contains(document.activeElement)) renderSettings();
+  },
+  imported(m) {
+    S.importing = null;
+    S.importMsg = m.text;
+    toast(m.text);
+    if (S.panel === 'settings') renderSettings();
+  },
   blocked(m) {
     const t = S.tabs.find((x) => x.id === m.id);
     if (t) t.blocked = m.n;
@@ -211,7 +223,7 @@ function renderBar() {
   $('#win [data-a="max"]').innerHTML = S.max ? WIN.restore : WIN.max;
   $('#win [data-a="max"]').title = S.max ? 'Restore' : 'Maximize';
   document.documentElement.toggleAttribute('data-max', !!S.max);
-  document.body.classList.toggle('waking', !!(t && t.url && t.loading && t.asleep));
+  document.body.classList.toggle('waking', !!(t && t.url && !t.shown));
   renderShield();
 }
 function renderShield() {
@@ -402,7 +414,7 @@ function togglePanel(p) {
   btns.forEach((b) => b.classList.toggle('on', b.dataset.p === p));
   movePill($('#side-seg'));
   $('#side-body').scrollTop = 0;
-  if (p === 'settings') renderSettings();
+  if (p === 'settings') { renderSettings(); send({ t: 'importSources' }); }
   else { $('#side-body').innerHTML = ''; send({ t: 'list', kind: p, q: p === 'history' ? $('#side-q').value : '' }); }
   if (p === 'history') setTimeout(() => $('#side-q').focus(), 60);
 }
@@ -509,6 +521,11 @@ const SCHEMA = [
     { k: 'tracking', label: 'Tracking prevention', desc: 'Built into the engine; Strict may break some sites', type: 'select', opts: [['strict', 'Strict'], ['balanced', 'Balanced'], ['basic', 'Basic'], ['off', 'Off']] },
     { type: 'buttons', items: [['updateLists', 'refresh', 'Update filter lists'], ['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] },
   ]],
+  ['Your data', [
+    { type: 'import' },
+    { k: 'save_passwords', label: 'Offer to save passwords', desc: "Saved in Lurt's profile on this PC", type: 'toggle' },
+    { k: 'autofill', label: 'Autofill forms', desc: 'Addresses and other details you type', type: 'toggle' },
+  ]],
   ['Performance', [
     { k: 'sleep_minutes', label: 'Sleep background tabs', desc: 'Frees memory; the tab reloads when you return', type: 'select', num: true, opts: [[0, 'Never'], [5, 'After 5 min'], [15, 'After 15 min'], [30, 'After 30 min'], [60, 'After 1 hour']] },
   ]],
@@ -578,6 +595,27 @@ function field(it, s) {
       return `<div class="set col"><div class="lbl"><small>Paused on these sites</small></div><div class="chips">` +
         s.adblock_allow.map((h) => `<span>${esc(h)}<button data-unallow="${esc(h)}" title="Resume blocking">${icon('x')}</button></span>`).join('') + '</div></div>';
     }
+    case 'import': {
+      const src = S.sources || [];
+      const busy = S.importing;
+      let h = `<div class="set col"><div class="lbl"><b>Import bookmarks & history</b><small>` +
+        (src.length ? 'From browsers on this PC:' : 'No other browsers found on this PC.') + '</small></div>';
+      if (src.length) {
+        h += '<div class="btns" style="padding:0">' +
+          (src.length > 1 ? `<button class="btn" data-import="*" data-label="all browsers" ${busy ? 'disabled' : ''}>${icon('arrow')}Import all (${src.length} profiles)</button>` : '') +
+          src.map((x) => {
+          const label = x.profile ? `${x.browser} · ${x.profile}` : x.browser;
+          return `<button class="btn" data-import="${esc(x.id)}" data-label="${esc(label)}" ${busy ? 'disabled' : ''}>${icon('arrow')}${esc(label)}</button>`;
+        }).join('') + '</div>';
+      }
+      h += `<div class="lbl" style="margin-top:6px"><small>From your Google account: export <b>Chrome</b> data at Google Takeout, then import <code>BrowserHistory.json</code> and <code>Bookmarks.html</code>. Any browser's bookmarks .html export works too.</small></div>` +
+        `<div class="btns" style="padding:0"><button class="btn" data-open="https://takeout.google.com/settings/takeout/custom/chrome">${icon('globe')}Open Google Takeout</button>` +
+        `<label class="btn" ${busy ? 'style="opacity:.5;pointer-events:none"' : ''}>${icon('folder')}Import a file<input type="file" id="import-file" accept=".json,.html,.htm" multiple hidden></label></div>`;
+      if (busy) h += `<div class="hint"><i class="spin" style="display:inline-block;vertical-align:-3px;margin-right:6px"></i>Importing from ${esc(busy)}…</div>`;
+      else if (S.importMsg) h += `<div class="hint">${esc(S.importMsg)}</div>`;
+      h += `<div class="hint">Passwords and signed-in sessions can't be copied: Chrome encrypts them so only Chrome can read them. Sign in once in Lurt and it remembers you.</div>`;
+      return h + '</div>';
+    }
     case 'note':
       return `<div class="hint" style="padding:6px 6px 0">${esc(val(it.text))}</div>`;
   }
@@ -594,6 +632,14 @@ function setSetting(k, v, { lazy = false, rerender = false } = {}) {
 }
 const side = $('#side-body');
 side.addEventListener('change', (e) => {
+  if (e.target.id === 'import-file') {
+    for (const f of e.target.files) {
+      S.importing = f.name; S.importMsg = '';
+      f.text().then((text) => send({ t: 'importFile', name: f.name, text }));
+    }
+    renderSettings();
+    return;
+  }
   const el = e.target; const k = el.dataset.k; if (!k || S.panel !== 'settings') return;
   if (el.type === 'checkbox') setSetting(k, el.checked, { rerender: k === 'adblock' });
   else if (el.tagName === 'SELECT') setSetting(k, el.hasAttribute('data-num') ? +el.value : el.value);
@@ -624,6 +670,15 @@ side.addEventListener('click', (e) => {
   }
   const sw = e.target.closest('.sw[data-color]');
   if (sw) { setSetting('accent', sw.dataset.color, { rerender: true }); return; }
+  const imp = e.target.closest('[data-import]');
+  if (imp) {
+    S.importing = imp.dataset.label; S.importMsg = '';
+    send({ t: 'importProfile', id: imp.dataset.import, label: imp.dataset.label });
+    renderSettings();
+    return;
+  }
+  const op = e.target.closest('[data-open]');
+  if (op) { send({ t: 'open', url: op.dataset.open, newTab: true }); return; }
   const un = e.target.closest('[data-unallow]');
   if (un) { setSetting('adblock_allow', S.settings.adblock_allow.filter((h) => h !== un.dataset.unallow), { rerender: true }); }
 });
