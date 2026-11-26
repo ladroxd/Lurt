@@ -1183,6 +1183,7 @@ const SECTIONS = [
     ['Google account', [{ type: 'account', label: 'Google account', kw: 'profile sign in sign out gmail switch' }]],
     ['What Lurt saves on this PC', [{ type: 'saved', label: 'What gets saved', kw: 'data storage profile folder cookies passwords' }]],
     ['Lurt profile', [{ type: 'profileSync', label: 'Back up Lurt settings', kw: 'sync backup export import restore settings account' }]],
+    ['Start over', [{ type: 'wipe', label: 'Delete all browser data', kw: 'clear reset erase wipe everything passwords bookmarks history' }]],
   ] },
   { id: 'appearance', icon: 'palette', title: 'Appearance', groups: [
     ['Theme', [
@@ -1226,7 +1227,10 @@ const SECTIONS = [
     ['Blocking', [F.adblock, { type: 'allow' }, F.updateLists]],
     ['Tracking', [F.tracking]],
     ['History', [{ type: 'histKeep', label: 'Delete history automatically', desc: 'Pages older than this are removed, checked every hour' }]],
-    ['Clear browsing data', [{ type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] }]],
+    ['Clear browsing data', [
+      { type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] },
+      { type: 'wipe', label: 'Delete all browser data', kw: 'clear reset erase wipe everything passwords bookmarks history' },
+    ]],
   ] },
   { id: 'data', icon: 'database', title: 'Your data', groups: [
     ['Import from browsers on this PC', [{ type: 'importPC' }]],
@@ -1541,6 +1545,10 @@ function field(it, s) {
         `</div><div class="hint">Everything stays on this PC (${mb} database). Nothing is sent to Lurt. Folder: ${esc(d?.dir || '')}</div>` +
         `<div class="btns"><button class="btn" data-act="openData">${icon('folder')}Open data folder</button><button class="btn" data-go="sec:privacy">${icon('trash')}Clear browsing data</button></div>`;
     }
+    case 'wipe':
+      return `<div class="set"><div class="lbl"><b>Delete all browser data</b><small>History, bookmarks, passwords, cookies and sign-ins, settings and open tabs. ` +
+        `${S.accounts.length ? "You'll be asked to sign out of Google first." : 'Lurt goes back to how it was on first launch.'}</small></div>` +
+        `<button class="btn danger" data-wipe>${icon('trash')}Delete everything</button></div>`;
     case 'profileSync':
       return `<div class="lbl"><small>Save your Lurt settings to a file and load them on another PC or after reinstalling. Syncing them to your Google account is coming: it needs Lurt to be registered with Google first.</small></div>` +
         `<div class="btns"><button class="btn" data-act="exportSettings">${icon('download')}Save settings to a file</button>` +
@@ -1694,10 +1702,41 @@ function avatar(a, size) {
 }
 H.account = (m) => {
   S.accounts = m.accounts || [];
+  // Signing out on the way to deleting everything: go on to the delete step.
+  if (S.wipeStep === 'signout' && document.body.classList.contains('dlg-open')) {
+    S.wipeStep = null;
+    wipeDialog(S.accounts.length ? 'failed' : undefined);
+  }
   renderAcct();
   if (S.overlay === 'acct-open') renderAcctPop();
   if (settingsOpen() && S.setSec === 'account') renderSettings();
 };
+// Delete all browser data: signed in, it signs you out of Google first; then it asks
+// you to type "delete" before wiping everything.
+function wipeDialog(state) {
+  const g = S.accounts[0];
+  dlg._orig = null;
+  if (g) {
+    dlg.innerHTML = `<h3>Sign out first</h3><p>You're signed in to Google as <b>${esc(g.email)}</b>. Lurt signs you out before deleting your data, so no account stays signed in.</p>` +
+      `<div class="err" id="td-err">${state === 'failed' ? "Couldn't sign out. Try again." : ''}</div>` +
+      `<div class="btns"><button class="btn" data-d="cancel">Cancel</button><button class="btn primary" data-d="save" ${state === 'busy' ? 'disabled' : ''}>${state === 'busy' ? 'Signing out…' : 'Sign out of Google'}</button></div>`;
+    dlg._save = () => { if (S.wipeStep) return; S.wipeStep = 'signout'; send({ t: 'signOut' }); wipeDialog('busy'); };
+  } else {
+    dlg.innerHTML = `<h3>Delete all browser data?</h3><p>This deletes, for good:</p><ul>` +
+      '<li>History</li><li>Bookmarks and folders</li><li>Saved passwords and autofill</li><li>Cookies, sign-ins, cache and site data</li><li>Your settings and start page favourites</li><li>Open tabs</li></ul>' +
+      `<p class="dim">Files in the mods folder stay.</p>` +
+      `<label>Type <b>delete</b> to confirm<input class="field" id="wipe-ok" spellcheck="false" autocomplete="off"></label>` +
+      `<div class="err" id="td-err"></div>` +
+      `<div class="btns"><button class="btn" data-d="cancel">Cancel</button><button class="btn primary danger-fill" data-d="save">Delete everything</button></div>`;
+    dlg._save = () => {
+      if ($('#wipe-ok').value.trim().toLowerCase() !== 'delete') { $('#td-err').textContent = 'Type delete to confirm'; return; }
+      send({ t: 'wipeAll' }); closeDlg();
+    };
+    setTimeout(() => $('#wipe-ok')?.focus(), 30);
+  }
+  document.body.classList.add('dlg-open');
+}
+document.addEventListener('click', (e) => { if (e.target.closest('#settings [data-wipe]')) { S.wipeStep = null; wipeDialog(); } });
 H.dataInfo = (m) => { S.dataInfo = m; if (settingsOpen() && S.setSec === 'account') renderSettings(); };
 function renderAcct() {
   const a = S.accounts[0];
@@ -1764,3 +1803,25 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'ac
 addEventListener('resize', () => S.overlay === 'acct-open' && placeAcct());
 renderAcct();
 
+// ---- startup skeleton ----------------------------------------------------------------
+// Rust draws a skeleton of this UI before the engine starts. Things whose size depends on
+// your data (tiles, bookmarks, the clock) are measured here and saved for next launch.
+let skelT, skelLast = '';
+function saveSkeleton() {
+  clearTimeout(skelT);
+  skelT = setTimeout(() => {
+    if (!document.body.classList.contains('blank')) return;
+    const w = (el) => Math.round(el.getBoundingClientRect().width);
+    // Width of the text itself (the clock lines are full-width blocks).
+    const textW = (el) => { if (!el) return 0; const r = document.createRange(); r.selectNodeContents(el); return Math.round(r.getBoundingClientRect().width); };
+    const shape = {
+      tiles: [...document.querySelectorAll('#tiles .tile > span:not(.ic)')].map(w).filter((x) => x > 0),
+      bm: [...document.querySelectorAll('#bmbar .bm')].filter((e) => e.offsetParent && e.getBoundingClientRect().right < innerWidth - 30).map(w),
+      time_w: textW($('#time')) || 259,
+      date_w: textW($('#date')) || 148,
+    };
+    const key = JSON.stringify(shape);
+    if (key !== skelLast) { skelLast = key; send({ t: 'skel', shape }); }
+  }, 1500);
+}
+new MutationObserver(saveSkeleton).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });

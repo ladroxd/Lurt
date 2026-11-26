@@ -54,6 +54,32 @@ pub struct Look {
     /// Active tab is the start page (vs. a website).
     pub blank: bool,
     pub scale: f32,
+    /// Open tabs at startup.
+    pub tabs: usize,
+    pub show_clock: bool,
+    /// The bookmarks bar is on screen at startup.
+    pub bm_bar: bool,
+    /// Sizes the UI measured last time (see `Shape`).
+    pub shape: Shape,
+}
+
+/// Sizes of things that depend on your data, measured by the UI while it runs and
+/// saved to `skeleton.json`, so the skeleton matches them on the next launch.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Shape {
+    /// Width of each start-page tile's label (the + Add tile included), CSS pixels.
+    pub tiles: Vec<f32>,
+    /// Width of each item shown on the bookmarks bar (folders included), CSS pixels.
+    pub bm: Vec<f32>,
+    pub time_w: f32,
+    pub date_w: f32,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self { tiles: vec![22.0], bm: Vec::new(), time_w: 259.0, date_w: 148.0 }
+    }
 }
 
 struct Splash {
@@ -322,73 +348,152 @@ fn paint(w: i32, h: i32, look: &Look) -> (Vec<u32>, Vec<u8>) {
     };
     let _ = look.tint;
     let (glass_a, bone_a) = if look.dark { (0.07, 0.07) } else { (0.6, 0.07) };
-    let r = look.radius * s;
-    let (fw, fh) = (w as f32, h as f32);
+    let r = look.radius;
+    // Laid out in CSS pixels, mirroring ui/style.css; `rect` scales to the screen.
+    let (cw, ch) = (w as f32 / s, h as f32 / s);
+    let mut rect = |x: f32, y: f32, ww: f32, hh: f32, rad: f32, rgb: (u8, u8, u8), a: f32, sk: bool| {
+        c.rrect(x * s, y * s, ww * s, hh * s, rad * s, rgb, a, sk);
+    };
 
     // Window tint (the native blur shows through it, exactly as in the real UI).
-    c.rrect(0.0, 0.0, fw, fh, 0.0, base, 1.0, false);
+    rect(0.0, 0.0, cw, ch, 0.0, base, 1.0, false);
 
-    // Toolbar: tab, new-tab button, nav buttons, address bar, actions.
-    let nav_w = 4.0 * 34.0 * s + 3.0 * s;
-    let acts_w = 69.0 * s;
-    let (row_y, omni_x0, omni_x1);
+    // Window buttons: 46x34 each in the top-right corner, with 10px glyphs.
+    for i in 0..3 {
+        let x = cw - 138.0 + i as f32 * 46.0;
+        rect(x + 18.0, 12.0, 10.0, 10.0, 2.0, bone, bone_a * 1.4, true);
+    }
+    // Groups of four 34px buttons, 1px apart: back/forward/reload/home and
+    // shield/panel/settings/account.
+    let group = 4.0 * 34.0 + 3.0;
+    let four = |rect: &mut dyn FnMut(f32, f32, f32, f32, f32, (u8, u8, u8), f32, bool), x0: f32, y: f32| {
+        for i in 0..4 {
+            rect(x0 + i as f32 * 35.0 + 8.0, y + 8.0, 18.0, 18.0, 6.0, bone, bone_a, true);
+        }
+    };
+
+    let top;
     if look.compact {
-        row_y = 10.0 * s;
-        omni_x0 = 8.0 * s + nav_w + 6.0 * s;
-        omni_x1 = omni_x0 + (440.0 * s).min(fw * 0.35);
-        let tab_x = omni_x1 + 6.0 * s;
-        c.rrect(tab_x, row_y + 3.0 * s, 210.0 * s, 32.0 * s, r * 0.78, glass, glass_a, true);
+        // One row: nav, address bar, tabs, actions.
+        let row_y = 10.0;
+        four(&mut rect, 8.0, row_y);
+        let ox = 8.0 + group + 6.0;
+        let ow = 440.0_f32.min(cw * 0.35);
+        rect(ox, row_y, ow, 38.0, r * 0.95, glass, glass_a, true);
+        rect(ox + 38.0, row_y + 14.0, 142.0_f32.min(ow * 0.5), 10.0, 5.0, bone, bone_a, true);
+        rect(ox + ow + 6.0, row_y + 3.0, 210.0, 32.0, r * 0.78, glass, glass_a, true);
+        four(&mut rect, cw - 138.0 - 8.0 - group, row_y);
+        top = 54.0;
     } else {
-        c.rrect(10.0 * s, 7.0 * s, 210.0 * s, 32.0 * s, r * 0.78, glass, glass_a, true);
-        c.rrect(28.0 * s, 18.0 * s, 110.0 * s, 10.0 * s, 5.0 * s, bone, bone_a, true);
-        c.rrect(228.0 * s, 11.0 * s, 24.0 * s, 24.0 * s, 7.0 * s, bone, bone_a * 0.7, true);
-        row_y = 42.0 * s;
-        omni_x0 = 8.0 * s + nav_w + 6.0 * s;
-        // The address bar's grid column ends where the window buttons column begins.
-        let end = fw - 184.0 * s;
-        let avail = (end - omni_x0).max(0.0);
-        let ow = avail.min(920.0 * s);
-        let ox = omni_x0 + (avail - ow) / 2.0;
-        omni_x1 = ox + ow;
-        c.rrect(ox, row_y, ow, 38.0 * s, r * 0.95, glass, glass_a, true);
-        c.rrect(ox + 36.0 * s, row_y + 14.0 * s, (ow * 0.28).min(240.0 * s), 10.0 * s, 5.0 * s, bone, bone_a, true);
-    }
-    let _ = omni_x1;
-    for i in 0..4 {
-        let bx = 8.0 * s + i as f32 * 35.0 * s + 8.0 * s;
-        c.rrect(bx, row_y + 10.0 * s, 18.0 * s, 18.0 * s, 6.0 * s, bone, bone_a, true);
-    }
-    for i in 0..2 {
-        let bx = fw - 8.0 * s - acts_w + i as f32 * 35.0 * s + 8.0 * s;
-        c.rrect(bx, row_y + 10.0 * s, 18.0 * s, 18.0 * s, 6.0 * s, bone, bone_a, true);
+        // Tabs: up to 210px each, 3px apart, shrinking to fit before the window buttons.
+        let count = look.tabs.max(1);
+        let room = (cw - 10.0 - 138.0 - 40.0).max(42.0);
+        let tw = ((room - (count as f32 - 1.0) * 3.0) / count as f32).clamp(42.0, 210.0);
+        let mut x = 10.0;
+        for i in 0..count {
+            if x + tw > cw - 138.0 {
+                break;
+            }
+            rect(x, 7.0, tw, 32.0, r * 0.78, glass, if i == 0 { glass_a } else { glass_a * 0.45 }, true);
+            rect(x + 12.0, 16.0, 14.0, 14.0, 4.0, bone, bone_a, true);
+            if tw >= 74.0 {
+                rect(x + 34.0, 18.0, (tw - 70.0).min(64.0), 10.0, 5.0, bone, bone_a, true);
+            }
+            x += tw + 3.0;
+        }
+        rect(x + 7.0, 11.0, 24.0, 24.0, 7.0, bone, bone_a * 0.7, true);
+
+        let row_y = 44.0;
+        four(&mut rect, 8.0, row_y);
+        four(&mut rect, cw - 8.0 - group, row_y);
+        // The address bar sits in the middle column, at most 920px wide and centered.
+        let col_x = 8.0 + group + 6.0;
+        let avail = (cw - 2.0 * col_x).max(0.0);
+        let ow = avail.min(920.0);
+        let ox = col_x + (avail - ow) / 2.0;
+        rect(ox, 42.0, ow, 38.0, r * 0.95, glass, glass_a, true);
+        rect(ox + 16.0, 54.0, 14.0, 14.0, 7.0, bone, bone_a, true);
+        rect(ox + 39.0, 56.0, 142.0_f32.min(ow * 0.4), 10.0, 5.0, bone, bone_a, true);
+
+        top = if look.bm_bar {
+            // Bookmarks bar: 30px tall at y 84; items are 26px tall, 2px apart.
+            if look.shape.bm.is_empty() {
+                rect(16.0, 94.0, 370.0_f32.min(cw - 40.0), 10.0, 5.0, bone, bone_a * 0.8, true);
+            }
+            let mut x = 10.0;
+            for &bw in &look.shape.bm {
+                if x + bw > cw - 40.0 {
+                    break;
+                }
+                rect(x + 7.0, 91.0, 16.0, 16.0, 4.0, bone, bone_a, true);
+                if bw > 40.0 {
+                    rect(x + 30.0, 94.0, bw - 38.0, 10.0, 5.0, bone, bone_a, true);
+                }
+                x += bw + 2.0;
+            }
+            120.0
+        } else {
+            86.0
+        };
     }
 
     // Page area.
-    let top = if look.compact { 54.0 * s } else { 86.0 * s };
-    let (vx, vy, vw, vh) = (8.0 * s, top, fw - 16.0 * s, fh - top - 8.0 * s);
+    let (vx, vy, vw, vh) = (8.0, top, cw - 16.0, ch - top - 8.0);
     let pr = r * 0.7;
-    c.rrect(vx - 1.0 * s, vy - 1.0 * s, vw + 2.0 * s, vh + 2.0 * s, pr + 1.0 * s, glass, if look.dark { 0.06 } else { 0.5 }, false);
-    c.rrect(vx, vy, vw, vh, pr, page, 1.0, false);
+    rect(vx - 1.0, vy - 1.0, vw + 2.0, vh + 2.0, pr + 1.0, glass, if look.dark { 0.06 } else { 0.5 }, false);
+    rect(vx, vy, vw, vh, pr, page, 1.0, false);
 
-    let (mx, my) = (vx + vw / 2.0, vy + vh / 2.0);
+    let mx = vx + vw / 2.0;
     if look.blank {
-        // Start page: clock, date, search pill.
-        c.rrect(mx - 120.0 * s, my - 110.0 * s, 240.0 * s, 56.0 * s, 16.0 * s, bone, bone_a, true);
-        c.rrect(mx - 80.0 * s, my - 42.0 * s, 160.0 * s, 12.0 * s, 6.0 * s, bone, bone_a, true);
-        let pw = (580.0 * s).min(vw * 0.84);
-        c.rrect(mx - pw / 2.0, my, pw, 50.0 * s, 25.0 * s, glass, glass_a, true);
+        // Start page: a centered column (30px apart, 6vh padding at the bottom) of the
+        // clock, the search pill and the tile grid.
+        let tiles = if look.shape.tiles.is_empty() { vec![22.0] } else { look.shape.tiles.clone() };
+        let grid_w = 660.0_f32.min(vw * 0.92);
+        let cols = (((grid_w + 12.0) / 104.0).floor() as usize).max(1);
+        let rows = tiles.len().div_ceil(cols);
+        let tiles_h = rows as f32 * 95.0 + rows.saturating_sub(1) as f32 * 10.0;
+        let clock_h = if look.show_clock { 96.0 + 30.0 } else { 0.0 };
+        let total = clock_h + 50.0 + 30.0 + tiles_h;
+        let mut y = vy + ((vh - 0.06 * ch) - total) / 2.0;
+        if look.show_clock {
+            let tw = look.shape.time_w;
+            rect(mx - tw / 2.0, y + 9.0, tw, 52.0, 14.0, bone, bone_a, true);
+            let dw = look.shape.date_w;
+            rect(mx - dw / 2.0, y + 80.0, dw, 12.0, 6.0, bone, bone_a, true);
+            y += clock_h;
+        }
+        let pw = 580.0_f32.min(vw * 0.84);
+        let px0 = mx - pw / 2.0;
+        rect(px0, y, pw, 50.0, 25.0, glass, glass_a, true);
+        rect(px0 + 22.0, y + 17.0, 16.0, 16.0, 8.0, bone, bone_a, true);
+        rect(px0 + 52.0, y + 20.0, 156.0_f32.min(pw * 0.4), 11.0, 5.5, bone, bone_a, true);
+        rect(px0 + pw - 51.0, y + 14.0, 41.0, 21.0, 6.0, bone, bone_a, true);
+        y += 50.0 + 30.0;
+        // Tile grid: 92px columns, 12px apart, centered; rows 95px tall, 10px apart.
+        let row_w = cols as f32 * 92.0 + (cols as f32 - 1.0) * 12.0;
+        let gx = mx - row_w / 2.0;
+        for (i, &lw) in tiles.iter().enumerate() {
+            let (tx, ty) = (gx + (i % cols) as f32 * 104.0, y + (i / cols) as f32 * 105.0);
+            let add = i == tiles.len() - 1;
+            rect(tx + 19.0, ty + 8.0, 54.0, 54.0, r * 1.05, glass, if add { glass_a * 0.4 } else { glass_a }, true);
+            if !add {
+                rect(tx + 34.0, ty + 23.0, 24.0, 24.0, 6.0, bone, bone_a, true);
+            }
+            let lw = lw.clamp(16.0, 88.0);
+            rect(tx + 46.0 - lw / 2.0, ty + 72.0, lw, 10.0, 5.0, bone, bone_a, true);
+        }
     } else {
         // A generic page: header bar, title, paragraphs.
         let px = vx + vw * 0.08;
         let pw = vw * 0.84;
-        c.rrect(vx + 16.0 * s, vy + 16.0 * s, vw - 32.0 * s, 44.0 * s, 12.0 * s, bone, bone_a * 0.8, true);
-        c.rrect(px, vy + 100.0 * s, pw * 0.55, 26.0 * s, 10.0 * s, bone, bone_a, true);
-        let mut y = vy + 150.0 * s;
+        rect(vx + 16.0, vy + 16.0, vw - 32.0, 44.0, 12.0, bone, bone_a * 0.8, true);
+        rect(px, vy + 100.0, pw * 0.55, 26.0, 10.0, bone, bone_a, true);
+        let mut y = vy + 150.0;
         for (i, frac) in [0.95, 0.88, 0.92, 0.6, 0.0, 0.9, 0.82, 0.94, 0.45].iter().enumerate() {
-            if *frac > 0.0 && y + 14.0 * s < vy + vh - 16.0 * s {
-                c.rrect(px, y, pw * frac, 12.0 * s, 6.0 * s, bone, bone_a * if i % 2 == 0 { 1.0 } else { 0.8 }, true);
+            if *frac > 0.0 && y + 14.0 < vy + vh - 16.0 {
+                rect(px, y, pw * frac, 12.0, 6.0, bone, bone_a * if i % 2 == 0 { 1.0 } else { 0.8 }, true);
             }
-            y += 26.0 * s;
+            y += 26.0;
         }
     }
     (c.px, c.mask)
@@ -404,8 +509,8 @@ mod tests {
     fn render_preview() {
         let dir = std::env::var("LURT_SPLASH_OUT").unwrap_or_else(|_| ".".into());
         for (name, dark, blank) in [("dark-start", true, true), ("light-page", false, false)] {
-            let (w, h) = (1280, 800);
-            let look = Look { dark, tint: 0.6, radius: 14.0, compact: false, blank, scale: 1.0 };
+            let (w, h) = (1480, 929);
+            let look = Look { dark, tint: 0.6, radius: 11.0, compact: false, blank, scale: 1.0, tabs: 1, show_clock: true, bm_bar: true, shape: Shape { tiles: vec![34.0, 31.0, 46.0, 75.0, 51.0, 75.0, 56.0, 71.0, 22.0], bm: vec![168.0], ..Shape::default() } };
             let (px, _) = paint(w, h, &look);
             // Composite over a mid-tone "desktop" so transparency is visible.
             let bg = if dark { 70u32 } else { 160u32 };

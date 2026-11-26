@@ -193,6 +193,10 @@ fn main() {
                 compact: settings.compact,
                 blank,
                 scale: window.scale_factor() as f32,
+                tabs: if settings.restore_session && !session.tabs.is_empty() { session.tabs.len() } else { 1 },
+                show_clock: settings.show_clock,
+                bm_bar: settings.bookmarks_bar == "always" || (settings.bookmarks_bar == "start" && blank),
+                shape: store.load_shape(),
             },
         );
         mark("skeleton shown");
@@ -1368,6 +1372,29 @@ impl App {
                 self.send_list("history", "");
                 self.toast("History cleared");
             }
+            "wipeAll" => {
+                // Only when signed out of Google: the UI signs you out first.
+                if !self.accounts.is_empty() {
+                    self.toast("Sign out of Google first");
+                    return;
+                }
+                // Cookies, cache, passwords, autofill and site data of the whole profile.
+                let _ = self.chrome.clear_all_browsing_data();
+                self.store.wipe();
+                self.closed.clear();
+                // Close every tab and start over with one new tab.
+                let old: Vec<u32> = self.tabs.iter().map(|t| t.id).collect();
+                self.new_tab(None, false);
+                for id in old {
+                    self.close_tab(id);
+                }
+                self.closed.clear();
+                self.apply_settings(Settings::default());
+                self.store.save_settings(&self.settings);
+                self.bookmarks_changed();
+                self.send_list("history", "");
+                self.toast("All browser data deleted");
+            }
             "clearData" => {
                 let _ = self.chrome.clear_all_browsing_data();
                 self.toast("Cookies, cache and site data cleared");
@@ -1387,6 +1414,11 @@ impl App {
                     let _ = v.reload();
                 }
                 self.toast("Mods reloaded");
+            }
+            "skel" => {
+                if let Ok(shape) = serde_json::from_value::<splash::Shape>(m["shape"].clone()) {
+                    self.store.save_shape(&shape);
+                }
             }
             "openData" => {
                 let _ = std::process::Command::new("explorer").arg(&self.store.dir).spawn();

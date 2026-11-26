@@ -263,6 +263,20 @@ impl Store {
             .unwrap_or_default()
     }
 
+    /// Sizes the startup skeleton copies (see `splash::Shape`).
+    pub fn load_shape(&self) -> crate::splash::Shape {
+        fs::read_to_string(self.dir.join("skeleton.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_shape(&self, s: &crate::splash::Shape) {
+        if let Ok(json) = serde_json::to_string(s) {
+            let _ = fs::write(self.dir.join("skeleton.json"), json);
+        }
+    }
+
     pub fn save_session(&self, s: &Session) {
         if let Ok(json) = serde_json::to_string(s) {
             let _ = fs::write(self.dir.join("session.json"), json);
@@ -331,6 +345,14 @@ impl Store {
 
     pub fn clear_history(&self) {
         let _ = self.db.execute_batch("DELETE FROM history; VACUUM;");
+    }
+
+    /// Delete everything Lurt keeps in its own files: history, bookmarks and folders,
+    /// the saved session and the skeleton sizes. (Settings are reset by the caller.)
+    pub fn wipe(&self) {
+        let _ = self.db.execute_batch("DELETE FROM history; DELETE FROM bookmarks; DELETE FROM bm_folders; VACUUM;");
+        let _ = fs::remove_file(self.dir.join("session.json"));
+        let _ = fs::remove_file(self.dir.join("skeleton.json"));
     }
 
     /// How much is saved: (bookmarks, folders, history entries).

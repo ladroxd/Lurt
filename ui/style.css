@@ -670,3 +670,10 @@ body.acct-open #acct-pop { display: block; animation: pop .2s var(--ease); }
 .saved { display: flex; flex-direction: column; gap: 2px; }
 .saved-row { display: flex; align-items: center; gap: 12px; padding: 8px 4px; }
 .saved-row > svg { width: 18px; height: 18px; flex: none; color: var(--fg3); }
+
+/* Delete all browser data */
+#tile-dlg p { margin: 0 0 10px; font-size: 12.5px; line-height: 1.5; color: var(--fg2); }
+#tile-dlg p.dim { color: var(--fg3); font-size: 12px; }
+#tile-dlg ul { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+.btn.primary.danger-fill { background: #e5484d; border-color: #e5484d; color: #fff; }
+.btn[disabled] { opacity: .6; pointer-events: none; }
