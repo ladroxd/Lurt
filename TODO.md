@@ -5,7 +5,7 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 ## Release
 
 - [x] Push `main` up to the Google account button (4442139).
-- [ ] Owner tests the latest build and says "push" for the newer commits (skeleton, Delete all browser data, bookmarks bar right-click fix).
+- [x] Push the skeleton, Delete all browser data, Chrome import, branded loading screen, Fewer processes and Privacy page commits.
 - [ ] Push `main`, then tag `v0.1.0` and push the tag. The release workflow builds `lurt.exe` and opens a **draft** release with the notes from `.github/release-notes/v0.1.0.md`.
 - [ ] Review the draft release on GitHub and publish it.
 
@@ -14,6 +14,16 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] **Sync Lurt settings to the Google account.** Store settings (and later bookmarks) in the account's Google Drive app data folder, which only Lurt can see. Needs a Google Cloud project with an OAuth client ID for a desktop app (owner to create it), sign-in through the system browser with PKCE, the `drive.appdata` scope, and a "Sync now / last synced" row in Settings > Account. Until then, Settings > Account saves and loads settings as a file.
 - [ ] Delete all browser data: optionally keep chosen kinds (for example keep bookmarks, delete the rest).
 - [ ] Show the account photo even before Google's photo server is reachable (cache it in the profile).
+
+## Privacy
+
+- [ ] Per-site exceptions for fingerprint protection and HTTPS upgrades (like the paused-sites list for blocking).
+- [ ] Remember site permission choices per site, with a list in Settings to review and reset them.
+- [ ] A private window (all tabs private, its own window) besides private tabs.
+- [ ] Custom filter lists: add a list by URL, and your own rules.
+- [ ] Custom Secure DNS server (any DoH template), and an "automatic" mode that falls back to Windows DNS.
+- [ ] Block third-party cookies on their own, separate from Strict tracking prevention.
+- [ ] Show in the shield panel what each protection did on the page (links cleaned, HTTPS upgrade, pings blocked).
 
 ## Extensions
 
@@ -53,3 +63,8 @@ These work in tests and screenshots but need a real mouse and keyboard to confir
 - [ ] Signed in to Google in Lurt: the account button shows your photo and name; Sign out signs you out of Gmail and YouTube too.
 - [ ] Delete all browser data while signed in: it signs you out first, then deletes everything after you type "delete".
 - [ ] Second launch after opening the start page: the skeleton lines up with your tiles, bookmarks and clock.
+- [ ] Protection level Strict on everyday sites (YouTube, Google, banking): note any that break.
+- [ ] WebRTC IP protection with a VPN on: a WebRTC leak test shows only the VPN address.
+- [ ] Secure DNS with Quad9, Mullvad or Google (the Cloudflare test page only detects Cloudflare).
+- [ ] Private tab: sign in to a site, close every private tab, open a new one: you're signed out.
+- [ ] Opening YouTube or Twitch shows the tinted, breathing loading screen with just the site name.
