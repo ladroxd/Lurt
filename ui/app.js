@@ -438,10 +438,18 @@ addr.addEventListener('focus', () => {
   S.sel = 0; S.rows = []; sugg.classList.remove('has');
   openOverlay();
 });
+// First click selects the whole address (like other browsers); a drag on that first
+// click, and every click after it, selects text normally.
 let keepSelection = false;
 addr.addEventListener('mousedown', () => { keepSelection = document.activeElement !== addr; });
-addr.addEventListener('mouseup', (e) => { if (keepSelection) { e.preventDefault(); addr.select(); keepSelection = false; } });
+addr.addEventListener('mouseup', (e) => {
+  if (keepSelection && addr.selectionStart === addr.selectionEnd) { e.preventDefault(); addr.select(); }
+  keepSelection = false;
+});
 addr.addEventListener('blur', () => {
+  // The window itself losing focus (e.g. while the page behind is swapped for its
+  // snapshot) isn't leaving the address bar: keep it open with your selection.
+  if (!document.hasFocus() && document.activeElement === addr) return;
   omni.classList.remove('focus');
   if (S.overlay === 'omni-open') closeOverlay(false);
   renderBar();

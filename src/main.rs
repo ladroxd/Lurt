@@ -1081,6 +1081,8 @@ impl App {
                         if let Some(v) = self.active_view() {
                             let _ = v.set_visible(false);
                         }
+                        // Hiding the page must not take keyboard focus from the address bar.
+                        let _ = self.chrome.focus();
                     }
                     return;
                 }
