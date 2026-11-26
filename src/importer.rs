@@ -40,6 +40,8 @@ pub struct Source {
     pub id: String,
     pub browser: String,
     pub profile: String,
+    /// The Google account the profile is signed in to, if any.
+    pub email: String,
 }
 
 /// Chromium "WebKit" timestamps: microseconds since 1601-01-01.
@@ -73,7 +75,7 @@ pub fn detect() -> Vec<Source> {
         }
         // Opera keeps a single profile in the root itself.
         if root.join("History").exists() || root.join("Bookmarks").exists() {
-            out.push(Source { id: root.to_string_lossy().into(), browser: browser.into(), profile: String::new() });
+            out.push(Source { id: root.to_string_lossy().into(), browser: browser.into(), profile: String::new(), email: String::new() });
             continue;
         }
         let names = profile_names(&root);
@@ -86,15 +88,16 @@ pub fn detect() -> Vec<Source> {
         dirs.sort();
         for dir in dirs {
             let key = dir.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            let profile = names.get(&key).cloned().unwrap_or(key);
-            out.push(Source { id: dir.to_string_lossy().into(), browser: browser.into(), profile });
+            let (profile, email) = names.get(&key).cloned().unwrap_or((key, String::new()));
+            out.push(Source { id: dir.to_string_lossy().into(), browser: browser.into(), profile, email });
         }
     }
     out
 }
 
-/// Friendly profile names (usually the Google account name) from `Local State`.
-fn profile_names(root: &Path) -> HashMap<String, String> {
+/// Friendly profile names (usually the Google account name) and the signed-in Google
+/// email of each profile, from `Local State`.
+fn profile_names(root: &Path) -> HashMap<String, (String, String)> {
     let mut map = HashMap::new();
     let Ok(text) = fs::read_to_string(root.join("Local State")) else { return map };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return map };
@@ -108,7 +111,7 @@ fn profile_names(root: &Path) -> HashMap<String, String> {
                 (true, false) => user.to_string(),
                 _ => dir.clone(),
             };
-            map.insert(dir.clone(), label);
+            map.insert(dir.clone(), (label, if user.contains('@') { user.to_string() } else { String::new() }));
         }
     }
     map

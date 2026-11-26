@@ -1744,6 +1744,36 @@ function wipeDialog(state) {
   }
   document.body.classList.add('dlg-open');
 }
+// Signed in to Google for the first time: offer to bring in data from this PC's browsers.
+H.importOffer = (m) => {
+  const a = m.account; const src = m.sources || [];
+  const mine = (x) => x.email && x.email.toLowerCase() === a.email.toLowerCase();
+  S.offerPick = 0;
+  const row = (x, i) => `<button class="pick${i === 0 ? ' on' : ''}" data-pick="${i}"><span class="dot"></span><span class="txt"><b>${esc(x.browser)}${x.profile ? ' · ' + esc(x.profile) : ''}</b>` +
+    `<small>${mine(x) ? 'Signed in with this account' : x.email ? esc(x.email) : 'Not signed in to Google'}</small></span></button>`;
+  dlg._orig = null;
+  dlg.innerHTML = `<h3>Bring your data into Lurt</h3>` +
+    `<p>You're signed in as <b>${esc(a.email)}</b>. Google doesn't let other browsers download Chrome Sync, so Lurt copies your bookmarks and history from a browser on this PC.</p>` +
+    `<div class="picks">${src.slice(0, 6).map(row).join('')}</div>` +
+    `<p class="dim">Passwords stay in that browser: it encrypts them so only it can read them. You can also import a Google Takeout export from Settings → Your data.</p>` +
+    `<div class="btns"><button class="btn" data-d="cancel">Not now</button><button class="btn primary" data-d="save">Import</button></div>`;
+  dlg._save = () => {
+    const x = src[S.offerPick]; if (!x) return;
+    const label = x.browser + (x.profile ? ' (' + x.profile + ')' : '');
+    S.importing = label; S.importMsg = '';
+    send({ t: 'importProfile', id: x.id, label });
+    toast('Importing from ' + label + '…');
+    closeDlg();
+  };
+  if (settingsOpen()) closeSettings();
+  bmOverlay();
+  document.body.classList.add('dlg-open');
+};
+dlg.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pick]'); if (!b) return;
+  S.offerPick = +b.dataset.pick;
+  dlg.querySelectorAll('[data-pick]').forEach((x) => x.classList.toggle('on', x === b));
+});
 document.addEventListener('click', (e) => { if (e.target.closest('#settings [data-wipe]')) { S.wipeStep = null; wipeDialog(); } });
 H.dataInfo = (m) => { S.dataInfo = m; if (settingsOpen() && S.setSec === 'account') renderSettings(); };
 function renderAcct() {

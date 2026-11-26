@@ -413,6 +413,25 @@ impl App {
         }
     }
 
+    /// A Google account appeared: once per account, offer to bring in bookmarks and history
+    /// from the browser profiles on this PC, the ones signed in to the same account first.
+    /// (Google doesn't let other browsers download Chrome Sync data.)
+    fn offer_import(&mut self, new: &[account::Account]) {
+        let Some(a) = new.iter().find(|a| !self.settings.import_offered.iter().any(|e| e.eq_ignore_ascii_case(&a.email))) else {
+            return;
+        };
+        let sources = importer::detect();
+        let mut s = self.settings.clone();
+        s.import_offered.push(a.email.clone());
+        self.apply_settings(s);
+        if sources.is_empty() {
+            return;
+        }
+        let (mut same, others): (Vec<_>, Vec<_>) = sources.into_iter().partition(|x| x.email.eq_ignore_ascii_case(&a.email));
+        same.extend(others);
+        self.send(json!({ "t": "importOffer", "account": a, "sources": same }));
+    }
+
     fn maximized(&self) -> bool {
         self.zoom.is_some() || self.window.is_maximized()
     }
@@ -1069,7 +1088,10 @@ impl App {
             Ev::Accounts(result) => {
                 let err = result.as_ref().err().cloned();
                 if let Ok(list) = result {
+                    let new: Vec<account::Account> =
+                        list.iter().filter(|a| !self.accounts.iter().any(|o| o.email == a.email)).cloned().collect();
                     self.accounts = list;
+                    self.offer_import(&new);
                 }
                 self.send(json!({ "t": "account", "accounts": self.accounts, "ok": err.is_none(), "err": err }));
             }

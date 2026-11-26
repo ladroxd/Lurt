@@ -50,6 +50,8 @@ pub struct Settings {
     pub shortcuts: Vec<Shortcut>,
     /// Sites (hosts) removed from the start page's most-visited tiles.
     pub hidden_tiles: Vec<String>,
+    /// Google accounts Lurt already offered to import browser data for.
+    pub import_offered: Vec<String>,
     /// Bookmarks bar under the toolbar: "always" | "start" (start page only) | "never".
     pub bookmarks_bar: String,
     /// Delete history older than this many days, automatically. 0 = keep forever.
@@ -88,6 +90,7 @@ impl Default for Settings {
             autofill: true,
             shortcuts: Vec::new(),
             hidden_tiles: Vec::new(),
+            import_offered: Vec::new(),
             bookmarks_bar: "always".into(),
             history_days: 0,
         }
