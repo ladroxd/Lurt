@@ -1393,6 +1393,8 @@ impl App {
                 self.store.save_settings(&self.settings);
                 self.bookmarks_changed();
                 self.send_list("history", "");
+                // The start page's favourites come from bookmarks and history: reload them.
+                self.send_list("top", "");
                 self.toast("All browser data deleted");
             }
             "clearData" => {
