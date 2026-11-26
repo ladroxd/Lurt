@@ -1028,6 +1028,8 @@ function bindSettings(el, active, ownActions) {
     if (t.type === 'range') {
       t.style.setProperty('--p', ((t.value - t.min) / (t.max - t.min)) * 100 + '%');
       t.closest('.set').querySelector('.val').textContent = t.value + t.dataset.unit;
+      // Window opacity is applied natively: preview it live while dragging.
+      if (k === 'window_opacity') send({ t: 'winOpacity', v: +t.value });
       setSetting(k, +t.value, { lazy: true });
     } else if (t.tagName === 'TEXTAREA' || t.type === 'text' || t.type === 'color') {
       setSetting(k, t.value, { lazy: true });

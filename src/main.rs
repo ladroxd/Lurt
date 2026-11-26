@@ -1134,6 +1134,10 @@ impl App {
             "star" => self.toggle_star(),
             "shield" => self.toggle_shield_for_site(),
             "shieldInfo" => self.send_shield_info(),
+            "winOpacity" => {
+                let v = m["v"].as_u64().unwrap_or(100).min(100) as u8;
+                glass::set_window_opacity(&self.window, v);
+            }
             "list" => self.send_list(&s("kind"), &s("q")),
             "suggest" => {
                 let q = s("q");
