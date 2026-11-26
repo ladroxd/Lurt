@@ -85,13 +85,15 @@ fn lookup(cookies: &str) -> Result<Vec<Account>, String> {
     Ok(parse(&body))
 }
 
-/// `["gaia.l.a.r", [["gaia.l.a", 1, "Name", "email", "photo", valid, ..., signed_out, ...], ...]]`
+/// `["gaia.l.a.r", [["gaia.l.a", 1, "Name", "email", "photo", ..., [9] valid, [10] id, ..., [14] signed out], ...]]`,
+/// read the same way as Chromium's `ParseListAccountsData`.
 fn parse(body: &str) -> Vec<Account> {
     let Ok(v) = serde_json::from_str::<Value>(body) else { return Vec::new() };
     let Some(list) = v.get(1).and_then(Value::as_array) else { return Vec::new() };
     list.iter()
-        .filter(|a| a.get(5).and_then(Value::as_i64).unwrap_or(1) != 0)
-        .filter(|a| a.get(9).and_then(Value::as_i64).unwrap_or(0) == 0)
+        // Field 9: the session is valid (1). Field 14: the account was signed out (1).
+        .filter(|a| a.get(9).and_then(Value::as_i64).unwrap_or(1) != 0)
+        .filter(|a| a.get(14).and_then(Value::as_i64).unwrap_or(0) == 0)
         .filter_map(|a| {
             let email = a.get(3)?.as_str()?.to_string();
             Some(Account {
@@ -133,7 +135,9 @@ pub fn sign_out(view: &WebView, proxy: EventLoopProxy<Ev>) {
 mod tests {
     #[test]
     fn parses_list_accounts() {
-        let body = r#"["gaia.l.a.r",[["gaia.l.a",1,"Ada L","ada@example.com","https://lh3.googleusercontent.com/a/x=s48",1,1,0,null,0,"123"],["gaia.l.a",1,"Old","old@example.com","",1,0,0,null,1,"456"]]]"#;
+        // As Google sends it: a signed-in account, one whose session expired (field 9 = 0)
+        // and one that was signed out (field 14 = 1).
+        let body = r#"["gaia.l.a.r",[["gaia.l.a",1,"Ada L","ada@example.com","https://lh3.googleusercontent.com/a/x=s48",1,1,0,null,1,"123",null,null,null,0,1],["gaia.l.a",1,"Expired","exp@example.com","",1,0,0,null,0,"456"],["gaia.l.a",1,"Old","old@example.com","",1,0,0,null,1,"789",null,null,null,1,1]]]"#;
         let a = super::parse(body);
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].email, "ada@example.com");
