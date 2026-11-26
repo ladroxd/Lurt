@@ -50,7 +50,8 @@ pub enum Ev {
     Source(u32, String),
     History(u32),
     NewTab(String),
-    Blocked(u32),
+    /// Tab id, blocked request URL, resource type.
+    Blocked(u32, String, &'static str),
     Fullscreen(u32, bool),
     Snapshot(u32, Vec<u8>),
     /// (serialized engine, freshly downloaded?)
@@ -453,6 +454,7 @@ impl App {
         t.view = view;
         t.loading = t.view.is_some();
         t.blocked = 0;
+        t.blocked_log.clear();
         t.shown = false;
         t.reveal_by = t.view.is_some().then(|| Instant::now() + Duration::from_millis(2500));
         self.layout_tabs();
@@ -662,6 +664,33 @@ impl App {
         self.send_list("bookmarks", "");
     }
 
+    /// What the shield blocked on the active page, grouped by domain, busiest first.
+    fn send_shield_info(&self) {
+        let Some(t) = self.tab(self.active) else { return };
+        let mut groups: Vec<(String, u32, Vec<&'static str>)> = Vec::new();
+        for (url, kind) in &t.blocked_log {
+            let host = util::host_of(url);
+            let i = match groups.iter().position(|g| g.0 == host) {
+                Some(i) => i,
+                None => {
+                    groups.push((host, 0, Vec::new()));
+                    groups.len() - 1
+                }
+            };
+            let g = &mut groups[i];
+            g.1 += 1;
+            if !g.2.contains(kind) {
+                g.2.push(kind);
+            }
+        }
+        groups.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let items: Vec<_> = groups.iter().map(|(h, n, k)| json!({ "h": h, "n": n, "k": k })).collect();
+        self.send(json!({
+            "t": "shieldInfo", "id": t.id, "n": t.blocked,
+            "host": util::host_of(&t.url), "items": items,
+        }));
+    }
+
     fn toggle_shield_for_site(&mut self) {
         let host = self.tab(self.active).map(|t| util::host_of(&t.url)).unwrap_or_default();
         if host.is_empty() {
@@ -822,6 +851,7 @@ impl App {
                 t.loading = started;
                 if started {
                     t.blocked = 0;
+                    t.blocked_log.clear();
                 } else if !util::is_internal(&url) {
                     let title = t.title.clone();
                     self.store.add_visit(&url, &title);
@@ -854,9 +884,12 @@ impl App {
             Ev::NewTab(url) => {
                 self.new_tab(Some(url), true);
             }
-            Ev::Blocked(id) => {
+            Ev::Blocked(id, url, kind) => {
                 if let Some(t) = self.tab_mut(id) {
                     t.blocked += 1;
+                    if t.blocked_log.len() < 2000 {
+                        t.blocked_log.push((url, kind));
+                    }
                     let n = t.blocked;
                     self.send(json!({ "t": "blocked", "id": id, "n": n }));
                 }
@@ -1057,6 +1090,7 @@ impl App {
             }
             "star" => self.toggle_star(),
             "shield" => self.toggle_shield_for_site(),
+            "shieldInfo" => self.send_shield_info(),
             "list" => self.send_list(&s("kind"), &s("q")),
             "suggest" => {
                 let q = s("q");

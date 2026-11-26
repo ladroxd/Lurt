@@ -110,6 +110,15 @@ const H = {
     const t = S.tabs.find((x) => x.id === m.id);
     if (t) t.blocked = m.n;
     if (m.id === S.active) renderShield();
+    if (m.id === S.active && S.overlay === 'shield-open') {
+      clearTimeout(popT); popT = setTimeout(() => send({ t: 'shieldInfo' }), 250);
+    }
+  },
+  shieldInfo(m) {
+    if (m.id !== S.active || S.overlay !== 'shield-open') return;
+    S.shieldInfo = m;
+    const t = cur(); if (t) t.blocked = m.n;
+    renderPop();
   },
 };
 window.lurt = { on: (m) => { try { (H[m.t] || (() => {}))(m); } catch (e) { console.error(e); } } };
@@ -227,6 +236,7 @@ function renderBar() {
   renderShield();
 }
 function renderShield() {
+  if (S.overlay === 'shield-open' && pop._tab !== S.active) closeShield(false);
   const t = cur(); const b = $('#shield'); const n = $('#shield-n');
   const on = S.settings ? S.settings.adblock && !S.allowed : true;
   b.classList.toggle('off', !on);
@@ -236,8 +246,8 @@ function renderShield() {
   n.textContent = count > 99 ? '99+' : count || '';
   n.classList.toggle('on', count > 0);
   b.title = !S.settings?.adblock ? 'Blocking is off (Settings → Privacy)'
-    : S.allowed ? `Blocking paused on ${hostOf(t?.url || '')}. Click to resume.`
-    : `${count} blocked on this page. Click to pause on this site.`;
+    : S.allowed ? `Blocking paused on ${hostOf(t?.url || '')}`
+    : `${count} blocked on this page`;
 }
 $('#newtab').onclick = () => send({ t: 'key', k: 'ctrl+t' });
 $('#back').onclick = () => send({ t: 'nav', a: 'back' });
@@ -245,10 +255,77 @@ $('#fwd').onclick = () => send({ t: 'nav', a: 'forward' });
 $('#reload').onclick = () => send({ t: 'nav', a: 'reload' });
 $('#home').onclick = () => send({ t: 'nav', a: 'home' });
 $('#star').onclick = () => send({ t: 'star' });
-$('#shield').onclick = () => {
-  if (!S.settings?.adblock) { togglePanel('settings'); return; }
-  if (cur()?.url) send({ t: 'shield' });
-};
+$('#shield').onclick = () => (S.overlay === 'shield-open' ? closeShield() : openShield());
+
+// ---- shield popover ---------------------------------------------------------
+const pop = $('#shield-pop');
+const KINDS = { script: 'scripts', image: 'images', xhr: 'requests', stylesheet: 'styles', media: 'media',
+  font: 'fonts', websocket: 'sockets', ping: 'pings', csp_report: 'reports', other: 'other' };
+S.shieldInfo = null;
+let popT;
+function openShield() {
+  S.shieldInfo = null; pop._tab = S.active;
+  renderPop();
+  openOverlay('shield-open');
+  send({ t: 'shieldInfo' });
+}
+function closeShield(focusPage) {
+  if (S.overlay === 'shield-open') closeOverlay(focusPage);
+}
+function placePop() {
+  const r = $('#shield').getBoundingClientRect();
+  pop.style.top = r.bottom + 8 + 'px';
+  pop.style.left = Math.max(8, Math.min(r.right - 320 + 6, innerWidth - 328)) + 'px';
+}
+function renderPop() {
+  const t = cur(); const info = S.shieldInfo;
+  const host = hostOf(t?.url || '');
+  const global = !!S.settings?.adblock;
+  const on = global && !S.allowed;
+  const n = on && t ? t.blocked : 0;
+  pop.classList.toggle('off', !on);
+  let html = `<div class="head">${icon(on ? 'shield' : 'shieldOff')}<div style="min-width:0"><b>${on ? 'Protected' : 'Not blocking'}</b>` +
+    `<small>${esc(host || 'Start page')}</small></div></div>`;
+  if (!global) {
+    html += `<label class="set"><div class="lbl"><b>Block ads &amp; trackers</b><small>Off for every site</small></div>` +
+      `<span class="switch"><input type="checkbox" data-a="global"><i></i></span></label>`;
+  } else if (host) {
+    html += `<label class="set"><div class="lbl"><b>Block on this site</b><small>${S.allowed ? 'Paused, ads will show here' : 'Turn off if the site breaks'}</small></div>` +
+      `<span class="switch"><input type="checkbox" data-a="site" ${on ? 'checked' : ''}><i></i></span></label>`;
+  }
+  if (on && host) {
+    html += `<div class="count"><strong>${n}</strong><span>${n === 1 ? 'request' : 'requests'} blocked on this page</span></div>`;
+    if (!info) html += `<div class="empty">Loading details...</div>`;
+    else if (!info.items.length) html += `<div class="empty">Nothing blocked yet. Trackers that load later will show up here.</div>`;
+    else {
+      html += `<div class="list">` + info.items.map((i) =>
+        `<div class="item" title="${esc(i.h)}"><span class="fav">${letter('https://' + i.h, i.h)}</span><div class="txt"><span class="t">${esc(i.h)}</span>` +
+        `<span class="u">${esc(i.k.map((k) => KINDS[k] || k).join(', '))}</span></div><em>${i.n}</em></div>`).join('') + `</div>`;
+    }
+  } else if (!host && global) {
+    html += `<div class="empty">Open a website to see what gets blocked.</div>`;
+  }
+  html += `<div class="foot"><button data-a="settings">Blocking settings</button></div>`;
+  pop.innerHTML = html;
+  placePop();
+}
+pop.addEventListener('change', (e) => {
+  const a = e.target.dataset.a;
+  if (a === 'site') send({ t: 'shield' });
+  if (a === 'global') { S.settings.adblock = true; send({ t: 'settings', s: S.settings }); }
+  // The page reloads with the new rule, so the snapshot behind us is stale.
+  setTimeout(() => closeShield(false), 280);
+});
+pop.addEventListener('click', (e) => {
+  if (e.target.closest('[data-a="settings"]')) { closeShield(false); togglePanel('settings'); }
+});
+addEventListener('mousedown', (e) => {
+  if (S.overlay === 'shield-open' && !pop.contains(e.target) && !$('#shield').contains(e.target)) closeShield(false);
+}, true);
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.overlay === 'shield-open') { e.preventDefault(); closeShield(true); }
+});
+addEventListener('resize', () => S.overlay === 'shield-open' && placePop());
 $('#menu').onclick = () => togglePanel(S.panel || S.lastPanel);
 $('#start-search').onclick = () => addr.focus();
 for (const b of document.querySelectorAll('#win button')) b.onclick = () => send({ t: 'win', a: b.dataset.a });
@@ -283,16 +360,18 @@ addEventListener('pointermove', (e) => {
 
 // ---- address bar & suggestions --------------------------------------------
 const sugg = $('#sugg');
-function openOverlay() {
+// Anything drawn over the page (address suggestions, shield popover) asks Rust to swap
+// the live page for a blurred snapshot, since the page is a native view on top of us.
+function openOverlay(cls = 'omni-open') {
   if (S.overlay) return;
-  S.overlay = true;
-  document.body.classList.add('omni-open');
+  S.overlay = cls;
+  document.body.classList.add(cls);
   send({ t: 'overlay', open: true });
 }
 function closeOverlay(focusPage) {
   if (!S.overlay) return;
+  document.body.classList.remove(S.overlay);
   S.overlay = false;
-  document.body.classList.remove('omni-open');
   snap.classList.remove('on', 'melt');
   sugg.classList.remove('has');
   send({ t: 'overlay', open: false, focusPage: !!focusPage });
@@ -327,6 +406,7 @@ function pick(i, newTab) {
 }
 let suggT;
 addr.addEventListener('focus', () => {
+  if (S.overlay === 'shield-open') closeShield();
   const t = cur();
   addr.value = t?.url || '';
   addr.select();
@@ -339,7 +419,7 @@ addr.addEventListener('mousedown', () => { keepSelection = document.activeElemen
 addr.addEventListener('mouseup', (e) => { if (keepSelection) { e.preventDefault(); addr.select(); keepSelection = false; } });
 addr.addEventListener('blur', () => {
   omni.classList.remove('focus');
-  closeOverlay(false);
+  if (S.overlay === 'omni-open') closeOverlay(false);
   renderBar();
 });
 addr.addEventListener('input', () => {

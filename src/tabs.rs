@@ -32,6 +32,8 @@ pub struct Tab {
     pub fav: String,
     pub loading: bool,
     pub blocked: u32,
+    /// What was blocked on the current page: (request URL, resource type). Capped.
+    pub blocked_log: Vec<(String, &'static str)>,
     pub back: bool,
     pub fwd: bool,
     pub last_active: Instant,
@@ -52,6 +54,7 @@ impl Tab {
             fav: String::new(),
             loading: false,
             blocked: 0,
+            blocked_log: Vec::new(),
             back: false,
             fwd: false,
             last_active: Instant::now(),
@@ -192,7 +195,7 @@ unsafe fn hook(
                     if engine.check_network_request(&r).should_block() {
                         let resp = env.CreateWebResourceResponse(None, 403, w!("Blocked"), w!(""))?;
                         args.SetResponse(&resp)?;
-                        let _ = p.send_event(Ev::Blocked(id));
+                        let _ = p.send_event(Ev::Blocked(id, uri.clone(), kind));
                     }
                 }
                 Ok(())
