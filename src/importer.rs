@@ -33,6 +33,23 @@ pub struct Item {
 pub struct Batch {
     pub bookmarks: Vec<Item>,
     pub history: Vec<Item>,
+    /// Shortcuts on the browser's new tab page: (title, url).
+    pub shortcuts: Vec<(String, String)>,
+}
+
+/// The shortcuts you added to Chrome's new tab page (`custom_links` in `Preferences`).
+fn chromium_shortcuts(dir: &Path) -> Vec<(String, String)> {
+    let Ok(text) = fs::read_to_string(dir.join("Preferences")) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else { return Vec::new() };
+    let Some(list) = v["custom_links"]["list"].as_array() else { return Vec::new() };
+    list.iter()
+        .filter(|l| !l["isMostVisited"].as_bool().unwrap_or(false))
+        .filter_map(|l| {
+            let url = l["url"].as_str()?;
+            keep(url).then(|| (l["title"].as_str().unwrap_or("").to_string(), url.to_string()))
+        })
+        .take(24)
+        .collect()
 }
 
 #[derive(Serialize, Clone)]
@@ -148,6 +165,7 @@ pub fn read_profile(id: &str, scratch: &Path) -> Result<Batch, String> {
         let _ = fs::remove_file(&copy);
         r?;
     }
+    batch.shortcuts = chromium_shortcuts(&dir);
     Ok(batch)
 }
 

@@ -63,6 +63,8 @@ pub enum Ev {
     Imported(Result<(usize, usize), String>, String),
     /// Google accounts signed in to the browser, or why they couldn't be read.
     Accounts(Result<Vec<account::Account>, String>),
+    /// New tab shortcuts found while importing a browser profile: (title, url).
+    ImportedShortcuts(Vec<(String, String)>),
     SignedOut,
 }
 
@@ -1110,6 +1112,20 @@ impl App {
                 }
                 self.account_at = Some(Instant::now() + Duration::from_millis(500));
             }
+            Ev::ImportedShortcuts(list) => {
+                // Add them to the start page favourites, skipping sites already pinned.
+                let mut s = self.settings.clone();
+                for (title, url) in list {
+                    let host = util::host_of(&url);
+                    if host.is_empty() || s.shortcuts.iter().any(|x| util::host_of(&x.url) == host && x.url == url) {
+                        continue;
+                    }
+                    s.hidden_tiles.retain(|h| *h != host);
+                    let title = if title.trim().is_empty() { host.clone() } else { title };
+                    s.shortcuts.push(store::Shortcut { title, url });
+                }
+                self.apply_settings(s);
+            }
             Ev::Imported(result, from) => {
                 let text = match result {
                     Ok((b, h)) => format!("Imported from {from}: {b} new bookmarks, {h} history entries"),
@@ -1503,7 +1519,11 @@ impl App {
                         let mut total = (0, 0);
                         let mut err = None;
                         for src in importer::detect() {
-                            match importer::read_profile(&src.id, &scratch).and_then(|b| importer::save(&db, &b)) {
+                            let batch = importer::read_profile(&src.id, &scratch);
+                            if let Ok(b) = &batch {
+                                let _ = proxy.send_event(Ev::ImportedShortcuts(b.shortcuts.clone()));
+                            }
+                            match batch.and_then(|b| importer::save(&db, &b)) {
                                 Ok((b, h)) => {
                                     total.0 += b;
                                     total.1 += h;
@@ -1516,7 +1536,11 @@ impl App {
                             _ => Ok(total),
                         }
                     } else if profile {
-                        importer::read_profile(&id, &scratch).and_then(|b| importer::save(&db, &b))
+                        let batch = importer::read_profile(&id, &scratch);
+                        if let Ok(b) = &batch {
+                            let _ = proxy.send_event(Ev::ImportedShortcuts(b.shortcuts.clone()));
+                        }
+                        batch.and_then(|b| importer::save(&db, &b))
                     } else {
                         importer::read_file(&name, &text).and_then(|b| importer::save(&db, &b))
                     };
