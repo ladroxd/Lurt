@@ -705,3 +705,31 @@ body.acct-open #acct-pop { display: block; animation: pop .2s var(--ease); }
 #wake.branded .wake-t { color: rgb(var(--fg)); font-size: 14px; font-weight: 600; letter-spacing: .01em; }
 @keyframes brand-breathe { from { opacity: .5; transform: scale(1); } to { opacity: 1; transform: scale(1.06); } }
 [data-calm] #wake.branded .wake-tint { animation: none; opacity: .85; }
+
+/* Privacy: protection level cards and filter lists */
+.lvls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 6px 8px; }
+.lvl { text-align: left; display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border-radius: calc(var(--radius) - 4px);
+  border: 1px solid var(--edge); background: var(--hover); color: rgb(var(--fg)); cursor: pointer; font: inherit;
+  transition: border-color .2s var(--ease), background .2s var(--ease), transform .2s var(--ease); }
+.lvl b { font-size: 13.5px; font-weight: 600; }
+.lvl small { font-size: 12px; line-height: 1.4; opacity: .65; }
+.lvl:not(.static):hover { transform: translateY(-1px); background: var(--press); }
+.lvl.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.lvl.static { cursor: default; opacity: .55; }
+.lvl.static.on { opacity: 1; }
+.lists { display: flex; flex-direction: column; margin: 2px 0 4px 14px; padding-left: 10px; border-left: 1px solid var(--edge); }
+.set.sub { min-height: 36px; padding: 6px 6px; }
+.set.sub b { font-size: 13px; font-weight: 500; }
+.lists input:disabled + i { opacity: .4; }
+
+/* Private tabs */
+.tab.private { background: linear-gradient(180deg, rgba(139, 92, 246, .16), rgba(139, 92, 246, .07)); }
+.tab.private.active { border-color: rgba(167, 139, 250, .55); }
+.tab.private .fav .i { width: 16px; height: 16px; color: #b69cff; }
+body.private.blank #start::before {
+  content: "Private tab \2014  no history is saved, and its cookies are deleted when you close your last private tab";
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%); max-width: 90%; text-align: center;
+  padding: 7px 14px; border-radius: 999px; font-size: 12.5px; color: rgb(var(--fg));
+  background: rgba(139, 92, 246, .16); border: 1px solid rgba(167, 139, 250, .35);
+}
+body.private #omni { box-shadow: 0 0 0 1px rgba(167, 139, 250, .35) inset; }

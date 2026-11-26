@@ -4,6 +4,7 @@
 //! browser UI ("chrome"), and one WebView2 per awake tab, all sharing one engine process.
 
 mod account;
+mod privacy;
 mod blocker;
 mod glass;
 mod importer;
@@ -50,7 +51,14 @@ pub enum Ev {
     Load(u32, bool, String),
     Source(u32, String),
     History(u32),
-    NewTab(String),
+    /// (opener tab, url): a page opened a link in a new tab.
+    NewTab(u32, String),
+    /// Load this URL in the tab instead: a cleaned link, or an HTTPS upgrade or its fallback.
+    Redirect(u32, String),
+    /// Browsing data deleted on quit.
+    Cleared,
+    /// The icon found on a site's homepage: (host, icon URL or "").
+    FoundIcon(String, String),
     /// Tab id, blocked request URL, resource type.
     Blocked(u32, String, &'static str),
     Fullscreen(u32, bool),
@@ -112,6 +120,11 @@ struct App {
     ui_ready: bool,
     started: Instant,
     quit: bool,
+    /// Quitting waits until data marked "delete on quit" is gone, or this deadline.
+    exit_clear: Option<Instant>,
+    exit_cleared: bool,
+    /// Per-session seed for fingerprint noise.
+    seed: u32,
 }
 
 /// `LURT_BENCH=1` prints startup timings to stderr, never shows the window,
@@ -206,11 +219,12 @@ fn main() {
         mark("skeleton shown");
     }
 
+    tabs::write_engine_prefs(&Store::webview_dir(), &settings);
     let mut ctx = WebContext::new(Some(Store::webview_dir()));
     let page = UI_HTML.replace("/*CSS*/", UI_CSS).replace("/*JS*/", UI_JS);
     let p = proxy.clone();
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
-    let args = tabs::ENGINE_ARGS.get_or_init(|| tabs::engine_args(settings.share_processes)).clone();
+    let args = tabs::ENGINE_ARGS.get_or_init(|| tabs::engine_args(&settings)).clone();
     let chrome = WebViewBuilder::new_with_web_context(&mut ctx)
         .with_additional_browser_args(args)
         .with_html(page)
@@ -236,7 +250,8 @@ fn main() {
     let shield = Rc::new(Shield::default());
     shield.enabled.set(settings.adblock);
     *shield.allow.borrow_mut() = settings.adblock_allow.clone();
-    blocker::load(store.dir.clone(), false, proxy.clone());
+    shield.privacy.set(privacy_of(&settings));
+    blocker::load(store.dir.clone(), false, settings.filter_lists.clone(), proxy.clone());
 
     let mut app = App {
         window,
@@ -262,6 +277,9 @@ fn main() {
         ui_ready: false,
         started: Instant::now(),
         quit: false,
+        exit_clear: None,
+        exit_cleared: false,
+        seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(7, |d| d.subsec_nanos() ^ d.as_secs() as u32),
     };
     app.restore_session();
 
@@ -317,10 +335,29 @@ fn main() {
         }
         *cf = ControlFlow::WaitUntil(wake);
         if app.quit {
-            app.save_session();
-            *cf = ControlFlow::Exit;
+            if app.exit_clear.is_none() {
+                app.begin_exit_clear();
+            }
+            match app.exit_clear {
+                Some(t) if !app.exit_cleared && t > Instant::now() => *cf = ControlFlow::WaitUntil(t),
+                _ => {
+                    app.save_session();
+                    *cf = ControlFlow::Exit;
+                }
+            }
         }
     });
+}
+
+fn privacy_of(s: &Settings) -> blocker::Privacy {
+    let deny = |v: &str| v == "block";
+    blocker::Privacy {
+        gpc: s.gpc,
+        strip: s.strip_tracking,
+        https: s.https_upgrade,
+        block_pings: s.block_pings,
+        deny: [deny(&s.perm_location), deny(&s.perm_camera), deny(&s.perm_mic), deny(&s.perm_notifications)],
+    }
 }
 
 fn theme_of(s: &str) -> Theme {
@@ -372,6 +409,7 @@ impl App {
                     "loading": t.loading, "blocked": t.blocked,
                     "asleep": t.view.is_none() && !t.url.is_empty(),
                     "shown": t.view.is_some() && t.shown,
+                    "private": t.private,
                 })
             })
             .collect();
@@ -538,12 +576,9 @@ impl App {
         if bench() {
             return;
         }
-        let tabs = self
-            .tabs
-            .iter()
-            .map(|t| SessionTab { url: t.url.clone(), title: t.title.clone() })
-            .collect();
-        let active = self.tabs.iter().position(|t| t.id == self.active).unwrap_or(0);
+        let kept: Vec<&Tab> = self.tabs.iter().filter(|t| !t.private).collect();
+        let tabs = kept.iter().map(|t| SessionTab { url: t.url.clone(), title: t.title.clone() }).collect();
+        let active = kept.iter().position(|t| t.id == self.active).unwrap_or(0);
         self.store.save_session(&Session { tabs, active });
     }
 
@@ -556,9 +591,12 @@ impl App {
             return;
         }
         let url = self.tabs[idx].url.clone();
+        let private = self.tabs[idx].private;
+        let s = &self.settings;
+        let script = privacy::page_script(s.gpc, s.fingerprint, self.seed);
         let view = tabs::create(
             id,
-            ViewOpts { url: &url, bounds: vp, visible: false, theme },
+            ViewOpts { url: &url, bounds: vp, visible: false, theme, private, script },
             &mut self.ctx,
             &self.window,
             &self.proxy,
@@ -566,7 +604,13 @@ impl App {
         );
         mark("page view created");
         if let Some(v) = &view {
-            tabs::set_autofill(v, self.settings.save_passwords, self.settings.autofill);
+            if private {
+                // A private tab has its own profile: nothing saved, same tracking prevention.
+                tabs::set_autofill(v, false, false);
+                tabs::set_tracking(v, &self.settings.tracking);
+            } else {
+                tabs::set_autofill(v, self.settings.save_passwords, self.settings.autofill);
+            }
         }
         let t = &mut self.tabs[idx];
         t.view = view;
@@ -615,6 +659,10 @@ impl App {
     }
 
     fn new_tab(&mut self, url: Option<String>, next_to_active: bool) -> u32 {
+        self.open_tab(url, next_to_active, self.settings.always_private)
+    }
+
+    fn open_tab(&mut self, url: Option<String>, next_to_active: bool, private: bool) -> u32 {
         let id = self.next_id;
         self.next_id += 1;
         let pos = if next_to_active {
@@ -623,7 +671,9 @@ impl App {
             self.tabs.len()
         };
         let blank = url.is_none();
-        self.tabs.insert(pos, Tab::new(id, url.unwrap_or_default(), String::new()));
+        let mut tab = Tab::new(id, url.unwrap_or_default(), String::new());
+        tab.private = private;
+        self.tabs.insert(pos, tab);
         self.activate(id);
         if blank {
             self.focus_address();
@@ -673,7 +723,7 @@ impl App {
     fn close_tab(&mut self, id: u32) {
         let Some(i) = self.tabs.iter().position(|t| t.id == id) else { return };
         let t = self.tabs.remove(i);
-        if !t.url.is_empty() {
+        if !t.url.is_empty() && !t.private {
             self.closed.push(t.url.clone());
             if self.closed.len() > 25 {
                 self.closed.remove(0);
@@ -765,6 +815,7 @@ impl App {
             let mut slept = false;
             for t in self.tabs.iter_mut() {
                 if t.id != self.active
+                    && !t.private
                     && t.last_active.elapsed() > limit
                     && t.view.as_ref().is_some_and(|v| !tabs::is_playing_audio(v))
                 {
@@ -885,7 +936,19 @@ impl App {
         }
         if old.tracking != s.tracking {
             tabs::set_tracking(&self.chrome, &s.tracking);
+            for t in self.tabs.iter().filter(|t| t.private) {
+                if let Some(v) = &t.view {
+                    tabs::set_tracking(v, &s.tracking);
+                }
+            }
         }
+        self.shield.privacy.set(privacy_of(s));
+        if old.filter_lists != s.filter_lists {
+            self.toast("Updating filter lists...");
+            blocker::load(self.store.dir.clone(), true, s.filter_lists.clone(), self.proxy.clone());
+        }
+        let restart = old.share_processes != s.share_processes || old.webrtc_protect != s.webrtc_protect || old.doh != s.doh;
+        let rescript = old.gpc != s.gpc || old.fingerprint != s.fingerprint;
         if old.save_passwords != s.save_passwords || old.autofill != s.autofill {
             for t in &self.tabs {
                 if let Some(v) = &t.view {
@@ -904,9 +967,56 @@ impl App {
                 self.toast(&format!("Deleted {n} old history entries"));
             }
         }
+        if rescript {
+            self.reload_views();
+        }
+        if restart {
+            self.toast("Restart Lurt to apply this");
+        }
         self.store.save_settings(&self.settings);
         self.send_settings();
         self.push_state();
+    }
+
+    fn remember_icon(&mut self, host: &str, url: &str) {
+        if self.store.set_icon(host, url) {
+            self.send(json!({ "t": "icon", "host": host, "url": url }));
+        }
+    }
+
+    /// Recreate page views (for settings baked into them): background tabs reload when
+    /// you switch to them, the current one now. Private tabs keep theirs.
+    fn reload_views(&mut self) {
+        for t in self.tabs.iter_mut().filter(|t| !t.private && t.view.is_some()) {
+            t.view = None;
+            t.loading = false;
+            t.shown = false;
+            t.reveal_by = None;
+        }
+        self.wake(self.active);
+        self.show_active();
+    }
+
+    /// On quit: delete what Settings > Privacy says to, then let the loop exit.
+    fn begin_exit_clear(&mut self) {
+        let s = &self.settings;
+        if s.exit_clear_history {
+            self.store.clear_history();
+        }
+        if !s.exit_clear_cookies {
+            self.exit_clear = Some(Instant::now());
+            return;
+        }
+        self.window.set_visible(false);
+        self.exit_clear = Some(Instant::now() + Duration::from_secs(4));
+        let p = self.proxy.clone();
+        tabs::clear_data(
+            &self.chrome,
+            tabs::site_data(),
+            move || {
+                let _ = p.send_event(Ev::Cleared);
+            },
+        );
     }
 
     /// Inject cosmetic ad filters and the user's site mods once a page's DOM is ready.
@@ -946,6 +1056,9 @@ impl App {
         match k {
             "ctrl+t" => {
                 self.new_tab(None, false);
+            }
+            "ctrl+shift+n" => {
+                self.open_tab(None, false, true);
             }
             "ctrl+w" => self.close_tab(self.active),
             "ctrl+l" | "alt+d" | "f6" => self.focus_address(),
@@ -1012,7 +1125,7 @@ impl App {
                 if started {
                     t.blocked = 0;
                     t.blocked_log.clear();
-                } else if !util::is_internal(&url) {
+                } else if !util::is_internal(&url) && !t.private {
                     let title = t.title.clone();
                     self.store.add_visit(&url, &title);
                 }
@@ -1026,7 +1139,7 @@ impl App {
                     }
                     t.url = url.clone();
                     // Single-page-app navigation never fires a page load.
-                    if !t.loading && !util::is_internal(&url) {
+                    if !t.loading && !util::is_internal(&url) && !t.private {
                         let title = t.title.clone();
                         self.store.add_visit(&url, &title);
                     }
@@ -1041,9 +1154,18 @@ impl App {
                 }
                 self.push_state();
             }
-            Ev::NewTab(url) => {
-                self.new_tab(Some(url), true);
+            Ev::NewTab(from, url) => {
+                // Links from a private tab stay private.
+                let private = self.settings.always_private || self.tab(from).is_some_and(|t| t.private);
+                self.open_tab(Some(url), true, private);
             }
+            Ev::Redirect(id, url) => {
+                if let Some(v) = self.tab(id).and_then(|t| t.view.as_ref()) {
+                    let _ = v.load_url(&url);
+                }
+            }
+            Ev::Cleared => self.exit_cleared = true,
+            Ev::FoundIcon(host, url) => self.remember_icon(&host, &url),
             Ev::Blocked(id, url, kind) => {
                 if let Some(t) = self.tab_mut(id) {
                     t.blocked += 1;
@@ -1158,6 +1280,13 @@ impl App {
                 let u = m["u"].as_str().unwrap_or("");
                 if u.len() < 2048 && (u.starts_with("https://") || u.starts_with("http://")) {
                     let u = u.to_string();
+                    // Remember icons a page declares itself, for favourites and bookmarks.
+                    let private = self.tab(id).is_some_and(|t| t.private);
+                    let host = util::host_of(&u);
+                    let page_host = self.tab(id).map(|t| util::host_of(&t.url)).unwrap_or_default();
+                    if !private && !page_host.is_empty() && !u.ends_with(&format!("{host}/favicon.ico")) {
+                        self.remember_icon(&page_host, &u);
+                    }
                     if let Some(t) = self.tab_mut(id) {
                         t.fav = u;
                     }
@@ -1443,8 +1572,30 @@ impl App {
                 self.toast("All browser data deleted");
             }
             "clearData" => {
-                let _ = self.chrome.clear_all_browsing_data();
+                // Not passwords or autofill: those have their own switch.
+                tabs::clear_data(
+                    &self.chrome,
+                    tabs::site_data(),
+                    || {},
+                );
                 self.toast("Cookies, cache and site data cleared");
+            }
+            "icons" => {
+                let map: serde_json::Map<String, Value> = self.store.icons().into_iter().map(|(h, u)| (h, Value::String(u))).collect();
+                self.send(json!({ "t": "icons", "map": map }));
+            }
+            "findIcon" => {
+                let (host, proxy) = (s("host"), self.proxy.clone());
+                if host.is_empty() || host.contains('/') {
+                    return;
+                }
+                std::thread::spawn(move || {
+                    let url = util::find_icon(&host).unwrap_or_default();
+                    let _ = proxy.send_event(Ev::FoundIcon(host, url));
+                });
+            }
+            "newPrivate" => {
+                self.open_tab(None, false, true);
             }
             "settings" => {
                 if let Ok(new) = serde_json::from_value::<Settings>(m["s"].clone()) {
@@ -1453,7 +1604,7 @@ impl App {
             }
             "updateLists" => {
                 self.toast("Updating filter lists...");
-                blocker::load(self.store.dir.clone(), true, self.proxy.clone());
+                blocker::load(self.store.dir.clone(), true, self.settings.filter_lists.clone(), self.proxy.clone());
             }
             "reloadMods" => {
                 self.send(json!({ "t": "mods", "css": self.store.ui_mods() }));

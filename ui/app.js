@@ -19,6 +19,7 @@ const P = {
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   star: '<path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z"/>',
   shield: '<path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.9-7 9-4-1.1-7-4.7-7-9V6.3z"/><path d="M9 12l2 2 4-4"/>',
+  mask: '<path d="M3.5 9.5c0-1.4 1.1-2.5 2.5-2.5h12c1.4 0 2.5 1.1 2.5 2.5v1c0 3.3-2.2 6-5 6-1.6 0-2.4-1.5-3.5-1.5S10.1 16.5 8.5 16.5c-2.8 0-5-2.7-5-6z"/><circle cx="8.5" cy="11" r="1.4"/><circle cx="15.5" cy="11" r="1.4"/>',
   shieldOff: '<path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.9-7 9-4-1.1-7-4.7-7-9V6.3z"/><path d="M4 4l16 16"/>',
   menu: '<path d="M5 9h14M5 15h9"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
@@ -202,10 +203,11 @@ function renderTabs() {
     if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
     el.classList.toggle('active', t.id === S.active);
     el.classList.toggle('asleep', !!t.asleep);
+    el.classList.toggle('private', !!t.private);
     const title = t.title || (t.url ? pretty(t.url) : 'New tab');
     if (el._title !== title) { el._title = title; el.title = title; el.querySelector('.title').textContent = title; }
-    const fk = t.loading ? 'spin' : `${t.url}|${t.fav}`;
-    if (el._fav !== fk) { el._fav = fk; el.querySelector('.fav').innerHTML = favHtml(t); }
+    const fk = t.loading ? 'spin' : `${t.url}|${t.fav}|${!!t.private}`;
+    if (el._fav !== fk) { el._fav = fk; el.querySelector('.fav').innerHTML = t.private && !t.url && !t.loading ? icon('mask') : favHtml(t); }
   });
   for (const [id, el] of tabEls) if (!seen.has(id)) { el.remove(); tabEls.delete(id); }
   requestAnimationFrame(() => {
@@ -282,6 +284,13 @@ function renderShield() {
     : `${count} blocked on this page`;
 }
 $('#newtab').onclick = () => send({ t: 'key', k: 'ctrl+t' });
+$('#newtab').oncontextmenu = (e) => {
+  e.preventDefault();
+  showMenu(e.clientX, e.clientY, [
+    { icon: 'plus', label: 'New tab', run: () => send({ t: 'key', k: 'ctrl+t' }) },
+    { icon: 'mask', label: 'New private tab', run: () => send({ t: 'newPrivate' }) },
+  ]);
+};
 $('#back').onclick = () => send({ t: 'nav', a: 'back' });
 $('#fwd').onclick = () => send({ t: 'nav', a: 'forward' });
 $('#reload').onclick = () => send({ t: 'nav', a: 'reload' });
@@ -638,6 +647,7 @@ function renderStart() {
   const t = cur();
   const blank = !t || !t.url;
   document.body.classList.toggle('blank', blank);
+  document.body.classList.toggle('private', !!(t && t.private));
   if (blank && !S.blank) send({ t: 'list', kind: 'top' });
   if (blank && !S.blankInit) { S.blankInit = true; send({ t: 'list', kind: 'top' }); }
   S.blank = blank;
@@ -662,12 +672,35 @@ function tileName(i) {
   if (i.pinned && i.title) return i.title;
   return (i.title || host).split(/[|\-–—:·]/)[0].trim() || host;
 }
+// Site icons: /favicon.ico, or the icon the site's pages declare (Discord and others have no
+// /favicon.ico). Lurt remembers declared icons, and looks one up on the homepage the first
+// time /favicon.ico is missing.
+S.icons = {};
+S.iconAsked = new Set();
+function iconImg(host, fallback, attr = 'src') {
+  const known = S.icons[host];
+  if (known === '') return fallback;
+  const src = known || `https://${host}/favicon.ico`;
+  return `<img ${attr}="${esc(src)}" alt="" onerror="iconMiss(${esc(JSON.stringify(host))});this.outerHTML=${esc(JSON.stringify(fallback))}">`;
+}
+function iconMiss(host) {
+  if (S.icons[host] !== undefined || S.iconAsked.has(host)) return;
+  S.iconAsked.add(host);
+  send({ t: 'findIcon', host });
+}
+let iconT = 0;
+H.icons = (m) => { S.icons = m.map || {}; renderTiles(); };
+H.icon = (m) => {
+  S.icons[m.host] = m.url;
+  clearTimeout(iconT);
+  iconT = setTimeout(() => { renderTiles(); if (typeof renderBmBar === 'function') renderBmBar(); }, 200);
+};
 function renderTiles() {
   S.tiles = tileList();
   $('#tiles').innerHTML = S.tiles.map((i, n) => {
     const host = hostOf(i.url);
     return `<button class="tile${i.pinned ? ' pinned' : ''}" data-i="${n}" data-url="${esc(i.url)}" title="${esc(i.title || i.url)}"><span class="ic glass">` +
-      `<img src="https://${esc(host)}/favicon.ico" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(i.url, i.title)))}"></span><span>${esc(tileName(i))}</span></button>`;
+      `${iconImg(host, letter(i.url, i.title))}</span><span>${esc(tileName(i))}</span></button>`;
   }).join('') + `<button class="tile add" data-add title="Add a favourite"><span class="ic glass">${icon('plus')}</span><span>Add</span></button>`;
 }
 $('#tiles').addEventListener('click', (e) => {
@@ -821,7 +854,7 @@ const bmName = (x) => x.title || (x.k === 'f' ? 'Folder' : hostOf(x.url) || pret
 function bmFav(x) {
   if (x.k === 'f') return icon('folder');
   const h = /^https?:/i.test(x.url) ? hostOf(x.url) : '';
-  return h ? `<img data-src="https://${esc(h)}/favicon.ico" alt="" onerror="this.outerHTML=${esc(JSON.stringify(letter(x.url, x.title)))}">` : letter(x.url, x.title);
+  return h ? iconImg(h, letter(x.url, x.title), 'data-src') : letter(x.url, x.title);
 }
 function bmEl(x, row) {
   const key = x.k === 'f' ? `data-f="${x.id}"` : `data-u="${esc(x.url)}" title="${esc((x.title ? x.title + '\n' : '') + x.url)}"`;
@@ -1266,14 +1299,36 @@ function runAction(btn) {
   }
   btn.classList.remove('armed');
   if (btn._label) btn.innerHTML = btn._label;
+  if (btn.dataset.act === 'newPrivate' && settingsOpen()) closeSettings();
   send({ t: btn.dataset.act });
 }
 
 // ---- settings --------------------------------------------------------------
 // A centered window over a blurred view of the browser, with a section list on the left.
 const ACCENTS = ['#8ab4ff', '#a78bfa', '#f472b6', '#fb7185', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#e2e8f0'];
+const PERM = [['ask', 'Ask'], ['block', 'Block']];
+// Filter lists: [id, name, what it does].
+const LISTS = [
+  ['easylist', 'EasyList', 'Ads'],
+  ['easyprivacy', 'EasyPrivacy', 'Trackers and analytics'],
+  ['peterlowe', 'Peter Lowe\'s list', 'Ad and tracking servers'],
+  ['ublock', 'uBlock filters', 'More ads and trackers, plus fixes for sites the others break'],
+  ['badware', 'Malware & scams', 'Fake download buttons, scam and malware sites'],
+  ['cookies', 'Cookie banners', 'Hides "accept cookies" pop-ups'],
+  ['annoyances', 'Annoyances', 'Newsletter pop-ups, chat boxes, social widgets'],
+  ['miners', 'Crypto miners', 'Scripts that mine cryptocurrency on your computer'],
+];
+// Protection levels: what each sets. Anything else shows as Custom.
+const LEVELS = {
+  standard: { adblock: true, filter_lists: ['easylist', 'easyprivacy', 'peterlowe', 'ublock', 'badware'], tracking: 'balanced', gpc: true, strip_tracking: true, block_pings: true, https_upgrade: true, fingerprint: false, webrtc_protect: false },
+  strict: { adblock: true, filter_lists: LISTS.map(([id]) => id), tracking: 'strict', gpc: true, strip_tracking: true, block_pings: true, https_upgrade: true, fingerprint: true, webrtc_protect: true },
+};
+function privLevel(s) {
+  const same = (a, b) => Array.isArray(a) ? a.length === b.length && a.every((x) => b.includes(x)) : a === b;
+  return Object.keys(LEVELS).find((l) => Object.entries(LEVELS[l]).every(([k, v]) => same(v, s[k]))) || 'custom';
+}
 const F = {
-  adblock: { k: 'adblock', label: 'Block ads & trackers', desc: () => S.shieldReady ? 'EasyList, EasyPrivacy and Peter Lowe\'s list' : 'Downloading filter lists...', type: 'toggle' },
+  adblock: { k: 'adblock', label: 'Block ads & trackers', desc: () => S.shieldReady ? `${(S.settings.filter_lists || []).length} filter lists on, pick them below` : 'Downloading filter lists...', type: 'toggle' },
   tracking: { k: 'tracking', label: 'Tracking prevention', desc: 'Built into the engine; Strict may break some sites', type: 'select', opts: [['strict', 'Strict'], ['balanced', 'Balanced'], ['basic', 'Basic'], ['off', 'Off']] },
   updateLists: { type: 'buttons', items: [['updateLists', 'refresh', 'Update filter lists']] },
 };
@@ -1323,8 +1378,36 @@ const SECTIONS = [
     ]],
   ] },
   { id: 'privacy', icon: 'shield', title: 'Privacy & trackers', groups: [
-    ['Blocking', [F.adblock, { type: 'allow' }, F.updateLists]],
-    ['Tracking', [F.tracking]],
+    ['Protection level', [{ type: 'privLevel', label: 'Protection level', kw: 'standard strict custom privacy mode' }]],
+    ['Blocking', [F.adblock, { type: 'lists', label: 'Filter lists', kw: 'easylist ublock cookie banners annoyances malware miners popups' }, { type: 'allow' }, F.updateLists]],
+    ['Tracking', [
+      F.tracking,
+      { k: 'strip_tracking', label: 'Clean tracking from links', desc: 'Removes utm_, fbclid, gclid and other tracking tags from addresses you open', type: 'toggle' },
+      { k: 'gpc', label: 'Ask sites not to sell or share my data', desc: 'Sends Global Privacy Control and Do Not Track. Reloads open tabs', type: 'toggle', kw: 'gpc dnt do not track' },
+      { k: 'block_pings', label: 'Block link-click pings', desc: 'Stops pages reporting which links you click (hyperlink auditing)', type: 'toggle', kw: 'ping hyperlink auditing' },
+    ]],
+    ['Fingerprinting', [
+      { k: 'fingerprint', label: 'Resist fingerprinting', desc: 'Hides your graphics card and CPU details and adds invisible noise to canvas and audio reads, different for every site. A few sites may act up. Reloads open tabs', type: 'toggle', kw: 'canvas webgl audio hardware' },
+    ]],
+    ['Connection', [
+      { k: 'https_upgrade', label: 'Use HTTPS when possible', desc: 'Loads http:// sites securely, back to HTTP only if a site doesn\'t support it', type: 'toggle', kw: 'https only secure ssl upgrade' },
+      { k: 'doh', label: 'Secure DNS', desc: 'Encrypts the lookups that turn site names into addresses, so your network can\'t see them. Applies after restarting Lurt', type: 'select', opts: [['off', 'Off (use Windows)'], ['cloudflare', 'Cloudflare 1.1.1.1'], ['quad9', 'Quad9'], ['mullvad', 'Mullvad'], ['google', 'Google']], kw: 'doh dns over https' },
+      { k: 'webrtc_protect', label: 'Protect my IP address in calls', desc: 'WebRTC uses only your main connection: no local addresses, and it stays behind a VPN. Applies after restarting Lurt', type: 'toggle', kw: 'webrtc ip leak vpn' },
+    ]],
+    ['Site permissions', [
+      { k: 'perm_location', label: 'Location', type: 'select', opts: PERM, kw: 'permission gps' },
+      { k: 'perm_camera', label: 'Camera', type: 'select', opts: PERM, kw: 'permission webcam' },
+      { k: 'perm_mic', label: 'Microphone', type: 'select', opts: PERM, kw: 'permission audio' },
+      { k: 'perm_notifications', label: 'Notifications', type: 'select', opts: PERM, kw: 'permission push' },
+    ]],
+    ['Private browsing', [
+      { type: 'buttons', items: [['newPrivate', 'mask', 'New private tab  (Ctrl+Shift+N)']] },
+      { k: 'always_private', label: 'Always open private tabs', desc: 'New tabs keep no history and their cookies go when the last private tab closes. Sites you\'re signed in to will ask you to sign in again', type: 'toggle', kw: 'incognito inprivate' },
+    ]],
+    ['Delete when Lurt closes', [
+      { k: 'exit_clear_history', label: 'History', type: 'toggle', kw: 'clear on exit' },
+      { k: 'exit_clear_cookies', label: 'Cookies, site data and cache', desc: 'Signs you out of sites. Passwords stay', type: 'toggle', kw: 'clear on exit' },
+    ]],
     ['History', [{ type: 'histKeep', label: 'Delete history automatically', desc: 'Pages older than this are removed, checked every hour' }]],
     ['Clear browsing data', [
       { type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] },
@@ -1532,7 +1615,7 @@ function renderTrackers() {
   const body = $('#side-body'); const y = body.scrollTop;
   body.innerHTML = h; body.scrollTop = y;
 }
-const KEYS = [['New tab', 'Ctrl T'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
+const KEYS = [['New tab', 'Ctrl T'], ['New private tab', 'Ctrl Shift N'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
   ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
 function field(it, s) {
   const label = `<div class="lbl"><b>${esc(it.label)}</b>${it.desc ? `<small>${esc(val(it.desc))}</small>` : ''}</div>`;
@@ -1553,6 +1636,18 @@ function field(it, s) {
     case 'select':
       return `<div class="set">${label}<select class="field" style="width:auto;min-width:150px" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
         it.opts.map(([v, l]) => `<option value="${v}" ${String(s[it.k]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('') + '</select></div>';
+    case 'privLevel': {
+      const cur = privLevel(s);
+      const card = (id, title, desc) => `<button class="lvl ${cur === id ? 'on' : ''}" data-level="${id}"><b>${title}</b><small>${desc}</small></button>`;
+      return `<div class="lvls">${card('standard', 'Standard', 'Blocks ads, trackers and malware. Sites work as usual')}` +
+        card('strict', 'Strict', 'Every list, strict tracking prevention, fingerprint and IP protection. Some sites may break') +
+        `<div class="lvl ${cur === 'custom' ? 'on' : ''} static"><b>Custom</b><small>Your own mix of the settings below</small></div></div>`;
+    }
+    case 'lists': {
+      const on = s.filter_lists || [];
+      return `<div class="lists">` + LISTS.map(([id, name, what]) =>
+        `<label class="set sub">${`<div class="lbl"><b>${esc(name)}</b><small>${esc(what)}</small></div>`}<span class="switch"><input type="checkbox" data-list="${id}" ${on.includes(id) ? 'checked' : ''} ${s.adblock ? '' : 'disabled'}><i></i></span></label>`).join('') + '</div>';
+    }
     case 'bmStats': {
       const marks = S.bm ? [...S.bm.kids.values()].flat().filter((x) => x.k === 'b').length : 0;
       const folders = S.bm ? S.bm.folders.size : 0;
@@ -1688,6 +1783,13 @@ function bindSettings(el, active, ownActions) {
       return;
     }
     if (e.target.dataset.a === 'site') { send({ t: 'shield' }); return; }
+    if (e.target.dataset.list) {
+      const id = e.target.dataset.list;
+      const cur = (S.settings.filter_lists || []).filter((x) => x !== id);
+      if (e.target.checked) cur.push(id);
+      setSetting('filter_lists', LISTS.map(([x]) => x).filter((x) => cur.includes(x)), { rerender: true });
+      return;
+    }
     if (e.target.hasAttribute('data-hk')) {
       S.histCustom = e.target.value === 'c';
       setSetting('history_days', S.histCustom ? (S.settings.history_days || 14) : +e.target.value, { rerender: true });
@@ -1698,8 +1800,9 @@ function bindSettings(el, active, ownActions) {
       return;
     }
     const t = e.target; const k = t.dataset.k; if (!k) return;
-    if (t.type === 'checkbox') setSetting(k, t.checked, { rerender: k === 'adblock' });
-    else if (t.tagName === 'SELECT') setSetting(k, t.hasAttribute('data-num') ? +t.value : t.value);
+    const lvlKey = k in LEVELS.standard;
+    if (t.type === 'checkbox') setSetting(k, t.checked, { rerender: lvlKey });
+    else if (t.tagName === 'SELECT') setSetting(k, t.hasAttribute('data-num') ? +t.value : t.value, { rerender: lvlKey });
     else if (t.type === 'color') setSetting(k, t.value, { rerender: true });
     else if (t.type === 'range') setSetting(k, +t.value);
   });
@@ -1726,6 +1829,13 @@ function bindSettings(el, active, ownActions) {
       seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === segBtn));
       movePill(seg);
       setSetting(seg.dataset.k, segBtn.dataset.v, { rerender: seg.dataset.k === 'backdrop' });
+      return;
+    }
+    const lvl = q('[data-level]');
+    if (lvl) {
+      const v = LEVELS[lvl.dataset.level];
+      Object.assign(S.settings, structuredClone(v));
+      setSetting('adblock', v.adblock, { rerender: true });
       return;
     }
     const sw = q('.sw[data-color]');
@@ -1756,7 +1866,7 @@ bindSettings($('#set-body'), settingsOpen, true);
 bindSettings($('#side-body'), () => S.panel === 'trackers', false);
 
 // ---- keyboard --------------------------------------------------------------
-const FORWARD = new Set(['ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+shift+t',
+const FORWARD = new Set(['ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+shift+t', 'ctrl+shift+n',
   'ctrl+1', 'ctrl+2', 'ctrl+3', 'ctrl+4', 'ctrl+5', 'ctrl+6', 'ctrl+7', 'ctrl+8', 'ctrl+9']);
 addEventListener('keydown', (e) => {
   let k = e.key.toLowerCase(); if (k === ',') k = 'comma';
@@ -1783,6 +1893,7 @@ addEventListener('keydown', (e) => {
 addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 
 send({ t: 'ready' });
+send({ t: 'icons' });
 
 // ---- Google account ------------------------------------------------------------------
 // The account signed in to Google in this browser (read by Rust from Google's own

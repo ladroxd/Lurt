@@ -5,6 +5,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashSet,
     fs,
     path::PathBuf,
     thread,
@@ -16,10 +17,24 @@ use tao::event_loop::EventLoopProxy;
 
 use crate::Ev;
 
-const LISTS: &[&str] = &[
-    "https://easylist.to/easylist/easylist.txt",
-    "https://easylist.to/easylist/easyprivacy.txt",
-    "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext",
+/// Filter lists you can turn on in Settings > Privacy, by id.
+pub const LISTS: &[(&str, &[&str])] = &[
+    ("easylist", &["https://easylist.to/easylist/easylist.txt"]),
+    ("easyprivacy", &["https://easylist.to/easylist/easyprivacy.txt"]),
+    ("peterlowe", &["https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=0&mimetype=plaintext"]),
+    (
+        "ublock",
+        &[
+            "https://ublockorigin.github.io/uAssets/filters/filters.txt",
+            "https://ublockorigin.github.io/uAssets/filters/privacy.txt",
+            "https://ublockorigin.github.io/uAssets/filters/quick-fixes.txt",
+            "https://ublockorigin.github.io/uAssets/filters/unbreak.txt",
+        ],
+    ),
+    ("badware", &["https://ublockorigin.github.io/uAssets/filters/badware.txt"]),
+    ("cookies", &["https://secure.fanboy.co.nz/fanboy-cookiemonster.txt"]),
+    ("annoyances", &["https://secure.fanboy.co.nz/fanboy-annoyance.txt"]),
+    ("miners", &["https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/nocoin.txt"]),
 ];
 
 /// Lists older than this are refreshed in the background.
@@ -31,6 +46,21 @@ pub struct Shield {
     pub engine: RefCell<Option<Engine>>,
     pub enabled: Cell<bool>,
     pub allow: RefCell<Vec<String>>,
+    /// Protections that work without filter lists.
+    pub privacy: Cell<Privacy>,
+    /// Sites that failed over HTTPS this session, so they load over HTTP.
+    pub https_skip: RefCell<HashSet<String>>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct Privacy {
+    /// Send Global Privacy Control and Do Not Track.
+    pub gpc: bool,
+    pub strip: bool,
+    pub https: bool,
+    pub block_pings: bool,
+    /// Deny without asking: location, camera, microphone, notifications.
+    pub deny: [bool; 4],
 }
 
 impl Shield {
@@ -54,9 +84,13 @@ fn cache_path(dir: &PathBuf) -> PathBuf {
 }
 
 /// Load the cached engine, or download and build it. Result arrives as an `Ev`.
-pub fn load(dir: PathBuf, force: bool, proxy: EventLoopProxy<Ev>) {
+pub fn load(dir: PathBuf, force: bool, lists: Vec<String>, proxy: EventLoopProxy<Ev>) {
     thread::spawn(move || {
         let cache = cache_path(&dir);
+        // Which lists the cache was built from: a different choice means a rebuild.
+        let key_path = dir.join("adblock.lists");
+        let key = lists.join(",");
+        let force = force || fs::read_to_string(&key_path).ok().as_deref() != Some(key.as_str());
         let age = fs::metadata(&cache)
             .and_then(|m| m.modified())
             .ok()
@@ -71,9 +105,10 @@ pub fn load(dir: PathBuf, force: bool, proxy: EventLoopProxy<Ev>) {
             }
         }
 
-        match build() {
+        match build(&lists) {
             Some(bytes) => {
                 let _ = fs::write(&cache, &bytes);
+                let _ = fs::write(&key_path, &key);
                 let _ = proxy.send_event(Ev::ShieldReady(bytes, true));
             }
             None if cached.is_none() => {
@@ -84,10 +119,11 @@ pub fn load(dir: PathBuf, force: bool, proxy: EventLoopProxy<Ev>) {
     });
 }
 
-fn build() -> Option<Vec<u8>> {
+fn build(lists: &[String]) -> Option<Vec<u8>> {
     let mut set = FilterSet::new(false);
     let mut got = 0;
-    for url in LISTS {
+    let urls = LISTS.iter().filter(|(id, _)| lists.iter().any(|l| l == id)).flat_map(|(_, u)| u.iter());
+    for url in urls {
         let text = ureq::get(*url)
             .call()
             .ok()

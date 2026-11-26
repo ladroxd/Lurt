@@ -6,8 +6,9 @@ use std::{rc::Rc, time::Instant};
 use tao::{event_loop::EventLoopProxy, window::Window};
 use webview2_com::{
     CapturePreviewCompletedHandler, ContainsFullScreenElementChangedEventHandler,
-    HistoryChangedEventHandler, Microsoft::Web::WebView2::Win32::*, SourceChangedEventHandler,
-    WebResourceRequestedEventHandler, take_pwstr,
+    ClearBrowsingDataCompletedHandler, HistoryChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
+    NavigationCompletedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
+    SourceChangedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::{
     Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET},
@@ -44,6 +45,8 @@ pub struct Tab {
     pub shown: bool,
     /// Reveal anyway at this time, for pages that are slow to render.
     pub reveal_by: Option<Instant>,
+    /// A private tab: its own cookies (gone when the last private tab closes), no history.
+    pub private: bool,
 }
 
 impl Tab {
@@ -63,6 +66,7 @@ impl Tab {
             last_active: Instant::now(),
             shown: false,
             reveal_by: None,
+            private: false,
         }
     }
 }
@@ -72,20 +76,100 @@ pub struct ViewOpts<'a> {
     pub bounds: Rect,
     pub visible: bool,
     pub theme: Theme,
+    pub private: bool,
+    /// The privacy script for every frame (see `privacy::page_script`).
+    pub script: Option<String>,
 }
 
 /// WebView2 engine arguments, the same for every view (views sharing a profile must match).
 /// Starts with wry's defaults: no mini menu and SmartScreen, autoplay allowed.
 pub static ENGINE_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-pub fn engine_args(share_processes: bool) -> String {
+pub fn engine_args(s: &crate::store::Settings) -> String {
     let mut a = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required");
-    if share_processes {
+    if s.share_processes {
         // Cross-site iframes stay in their page's renderer instead of a process each
         // ("WebView2 Subframe: stripe.network" and so on): about half the memory.
         a.push_str(" --disable-site-isolation-trials");
     }
     a
+}
+
+/// Engine preferences with no API, written to its own files before it starts: Secure DNS
+/// (in `Local State`) and how WebRTC picks network interfaces (in the profile's `Preferences`).
+pub fn write_engine_prefs(root: &std::path::Path, s: &crate::store::Settings) {
+    use serde_json::{Value, json};
+    fn edit(path: &std::path::Path, f: impl FnOnce(&mut serde_json::Map<String, Value>) -> bool) {
+        let mut v = match std::fs::read_to_string(path) {
+            // Never clobber a file we can't read.
+            Ok(t) => match serde_json::from_str::<Value>(&t) {
+                Ok(v) if v.is_object() => v,
+                _ => return,
+            },
+            Err(_) => json!({}),
+        };
+        let Some(map) = v.as_object_mut() else { return };
+        if f(map) {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(path, v.to_string());
+        }
+    }
+    let dir = root.join("EBWebView");
+    let template = match s.doh.as_str() {
+        "cloudflare" => "https://cloudflare-dns.com/dns-query",
+        "quad9" => "https://dns.quad9.net/dns-query",
+        "mullvad" => "https://dns.mullvad.net/dns-query",
+        "google" => "https://dns.google/dns-query",
+        _ => "",
+    };
+    edit(&dir.join("Local State"), |m| {
+        if template.is_empty() {
+            m.remove("dns_over_https").is_some()
+        } else {
+            let want = json!({ "mode": "secure", "templates": template });
+            m.insert("dns_over_https".into(), want.clone()).as_ref() != Some(&want)
+        }
+    });
+    edit(&dir.join("Default").join("Preferences"), |m| {
+        let webrtc = m.entry("webrtc").or_insert_with(|| json!({}));
+        let Some(w) = webrtc.as_object_mut() else { return false };
+        if s.webrtc_protect {
+            let want = json!("default_public_interface_only");
+            w.insert("ip_handling_policy".into(), want.clone()).as_ref() != Some(&want)
+        } else {
+            w.remove("ip_handling_policy").is_some()
+        }
+    });
+}
+
+/// Cookies, site storage and cache (not passwords, autofill or settings).
+pub fn site_data() -> COREWEBVIEW2_BROWSING_DATA_KINDS {
+    COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_SITE | COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE
+}
+
+/// Delete browsing data of a view's profile; `done` runs when it's finished.
+pub fn clear_data(view: &WebView, kinds: COREWEBVIEW2_BROWSING_DATA_KINDS, done: impl FnOnce() + 'static) {
+    unsafe {
+        let r = view
+            .webview()
+            .cast::<ICoreWebView2_13>()
+            .and_then(|w| w.Profile())
+            .and_then(|p| p.cast::<ICoreWebView2Profile2>())
+            .and_then(|p| {
+                p.ClearBrowsingData(
+                    kinds,
+                    &ClearBrowsingDataCompletedHandler::create(Box::new(move |_| {
+                        done();
+                        Ok(())
+                    })),
+                )
+            });
+        if let Err(e) = r {
+            eprintln!("lurt: clear browsing data: {e}");
+        }
+    }
 }
 
 pub fn create(
@@ -114,18 +198,19 @@ pub fn create(
         if f.size.is_some() {
             NewWindowResponse::Allow
         } else {
-            let _ = p.send_event(Ev::NewTab(url));
+            let _ = p.send_event(Ev::NewTab(id, url));
             NewWindowResponse::Deny
         }
     };
 
     let view = WebViewBuilder::new_with_web_context(ctx)
-        .with_additional_browser_args(ENGINE_ARGS.get().cloned().unwrap_or_else(|| engine_args(true)))
-        .with_url(opts.url)
+        .with_additional_browser_args(ENGINE_ARGS.get().cloned().unwrap_or_default())
+        .with_incognito(opts.private)
         .with_bounds(opts.bounds)
         .with_visible(opts.visible)
         .with_focused(opts.visible)
         .with_initialization_script_for_main_only(CONTENT_JS, true)
+        .with_initialization_script_for_main_only(opts.script.unwrap_or_default(), false)
         .with_ipc_handler(ipc)
         .with_document_title_changed_handler(title)
         .with_on_page_load_handler(load)
@@ -139,6 +224,8 @@ pub fn create(
     if let Err(e) = unsafe { hook(&view, id, proxy.clone(), shield.clone()) } {
         eprintln!("lurt: native hooks failed for tab {id}: {e}");
     }
+    // Load only now, so the first page also gets clean links, HTTPS and privacy headers.
+    let _ = view.load_url(opts.url);
     Some(view)
 }
 
@@ -163,18 +250,35 @@ unsafe fn hook(
             )?,
             Err(_) => wv.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?,
         }
-        let p = proxy.clone();
+        let (p, shield_req, env) = (proxy.clone(), shield.clone(), env.clone());
         wv.add_WebResourceRequested(
             &WebResourceRequestedEventHandler::create(Box::new(move |sender, args| {
+                let shield = &shield_req;
                 let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let pv = shield.privacy.get();
+                let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
+                args.ResourceContext(&mut ctx)?;
+                if pv.gpc {
+                    if let Ok(h) = args.Request().and_then(|r| r.Headers()) {
+                        let _ = h.SetHeader(w!("Sec-GPC"), w!("1"));
+                        let _ = h.SetHeader(w!("DNT"), w!("1"));
+                    }
+                }
+                // Hyperlink auditing: <a ping> tells a site which links you click.
+                if pv.block_pings && ctx == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING {
+                    let resp = env.CreateWebResourceResponse(None, 403, w!("Blocked"), w!(""))?;
+                    args.SetResponse(&resp)?;
+                    let mut s = PWSTR::null();
+                    args.Request()?.Uri(&mut s)?;
+                    let _ = p.send_event(Ev::Blocked(id, take_pwstr(s), "ping"));
+                    return Ok(());
+                }
                 if !shield.enabled.get() {
                     return Ok(());
                 }
                 let engine = shield.engine.borrow();
                 let Some(engine) = engine.as_ref() else { return Ok(()) };
 
-                let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
-                args.ResourceContext(&mut ctx)?;
                 let kind = match ctx {
                     // Never block the page you asked for; ad iframes lose their
                     // scripts and images below, and cosmetic rules hide the frame.
@@ -215,6 +319,109 @@ unsafe fn hook(
                         args.SetResponse(&resp)?;
                         let _ = p.send_event(Ev::Blocked(id, uri.clone(), kind));
                     }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        // --- clean links and HTTPS upgrades, before a page loads ---
+        // The host last upgraded to HTTPS, to fall back to HTTP if that fails.
+        let upgraded: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        let (p, sh, up) = (proxy.clone(), shield.clone(), upgraded.clone());
+        wv.add_NavigationStarting(
+            &NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let pv = sh.privacy.get();
+                // The page request itself (sub-requests get it in WebResourceRequested).
+                if pv.gpc {
+                    if let Ok(h) = args.RequestHeaders() {
+                        let _ = h.SetHeader(w!("Sec-GPC"), w!("1"));
+                        let _ = h.SetHeader(w!("DNT"), w!("1"));
+                    }
+                }
+                if !pv.strip && !pv.https {
+                    return Ok(());
+                }
+                let mut s = PWSTR::null();
+                args.Uri(&mut s)?;
+                let uri = take_pwstr(s);
+                // Server redirects aren't upgraded: a site sending you back to HTTP would loop.
+                let mut redirected = BOOL(0);
+                args.IsRedirected(&mut redirected)?;
+                let skip = sh.https_skip.borrow();
+                if let Some(clean) = crate::privacy::clean_url(&uri, pv.strip, pv.https && !redirected.as_bool(), &skip) {
+                    if uri.starts_with("http://") && clean.starts_with("https://") {
+                        *up.borrow_mut() = Some(util::host_of(&clean));
+                    }
+                    args.SetCancel(true)?;
+                    let _ = p.send_event(Ev::Redirect(id, clean));
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        let (p, sh, up) = (proxy.clone(), shield.clone(), upgraded);
+        wv.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+                let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let mut ok = BOOL(0);
+                args.IsSuccess(&mut ok)?;
+                let mut err = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+                args.WebErrorStatus(&mut err)?;
+                // Our own cancel of the HTTP request lands here too.
+                if err == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                    return Ok(());
+                }
+                let Some(host) = up.borrow_mut().take() else { return Ok(()) };
+                let broken = matches!(
+                    err,
+                    COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_COMMON_NAME_IS_INCORRECT
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_EXPIRED
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CLIENT_CERTIFICATE_CONTAINS_ERRORS
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_REVOKED
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_IS_INVALID
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_TIMEOUT
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_ERROR_HTTP_INVALID_SERVER_RESPONSE
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_RESET
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_CANNOT_CONNECT
+                        | COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN
+                );
+                if !ok.as_bool() && broken {
+                    let mut s = PWSTR::null();
+                    sender.Source(&mut s)?;
+                    let src = take_pwstr(s);
+                    if util::host_of(&src) == host {
+                        if let Some(rest) = src.strip_prefix("https://") {
+                            sh.https_skip.borrow_mut().insert(host);
+                            let _ = p.send_event(Ev::Redirect(id, format!("http://{rest}")));
+                        }
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        // --- site permissions you chose to always block ---
+        let sh = shield.clone();
+        wv.add_PermissionRequested(
+            &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut k = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+                args.PermissionKind(&mut k)?;
+                let i = match k {
+                    COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => 0,
+                    COREWEBVIEW2_PERMISSION_KIND_CAMERA => 1,
+                    COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => 2,
+                    COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => 3,
+                    _ => return Ok(()),
+                };
+                if sh.privacy.get().deny[i] {
+                    args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY)?;
                 }
                 Ok(())
             })),

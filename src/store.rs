@@ -38,6 +38,32 @@ pub struct Settings {
     pub adblock_allow: Vec<String>,
     /// "strict" | "balanced" | "basic" | "off"
     pub tracking: String,
+    /// Filter list ids (see `blocker::LISTS`).
+    pub filter_lists: Vec<String>,
+    /// Send Global Privacy Control and Do Not Track to sites.
+    pub gpc: bool,
+    /// Remove tracking parameters (utm_, fbclid...) from links you open.
+    pub strip_tracking: bool,
+    /// Block hyperlink auditing pings.
+    pub block_pings: bool,
+    /// Load sites over HTTPS when they support it.
+    pub https_upgrade: bool,
+    /// Hide hardware details and add noise to canvas and audio reads.
+    pub fingerprint: bool,
+    /// WebRTC uses only the public network interface (no local IPs; respects a VPN). Restart.
+    pub webrtc_protect: bool,
+    /// Secure DNS provider: "off" | "cloudflare" | "quad9" | "mullvad" | "google". Restart.
+    pub doh: String,
+    /// Site permissions: "ask" | "block".
+    pub perm_location: String,
+    pub perm_camera: String,
+    pub perm_mic: String,
+    pub perm_notifications: String,
+    /// Every new tab is private.
+    pub always_private: bool,
+    /// Delete on quit.
+    pub exit_clear_history: bool,
+    pub exit_clear_cookies: bool,
     /// Unload background tabs after this many minutes. 0 = never.
     pub sleep_minutes: u32,
     /// Let cross-site iframes (ads, payment and video embeds) share their page's process
@@ -87,6 +113,21 @@ impl Default for Settings {
             adblock: true,
             adblock_allow: Vec::new(),
             tracking: "balanced".into(),
+            filter_lists: ["easylist", "easyprivacy", "peterlowe", "ublock", "badware"].map(String::from).to_vec(),
+            gpc: true,
+            strip_tracking: true,
+            block_pings: true,
+            https_upgrade: true,
+            fingerprint: false,
+            webrtc_protect: false,
+            doh: "off".into(),
+            perm_location: "ask".into(),
+            perm_camera: "ask".into(),
+            perm_mic: "ask".into(),
+            perm_notifications: "ask".into(),
+            always_private: false,
+            exit_clear_history: false,
+            exit_clear_cookies: false,
             sleep_minutes: 30,
             share_processes: true,
             ui_css: String::new(),
@@ -227,7 +268,8 @@ impl Store {
                 url TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS bm_folders(
                 id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
-                parent INTEGER NOT NULL DEFAULT 0, pos REAL NOT NULL DEFAULT 0);",
+                parent INTEGER NOT NULL DEFAULT 0, pos REAL NOT NULL DEFAULT 0);
+             CREATE TABLE IF NOT EXISTS icons(host TEXT PRIMARY KEY, url TEXT NOT NULL DEFAULT '');",
         );
         migrate_bookmarks(&db);
         Self { db, dir }
@@ -357,9 +399,26 @@ impl Store {
     /// Delete everything Lurt keeps in its own files: history, bookmarks and folders,
     /// the saved session and the skeleton sizes. (Settings are reset by the caller.)
     pub fn wipe(&self) {
-        let _ = self.db.execute_batch("DELETE FROM history; DELETE FROM bookmarks; DELETE FROM bm_folders; VACUUM;");
+        let _ = self.db.execute_batch("DELETE FROM history; DELETE FROM bookmarks; DELETE FROM bm_folders; DELETE FROM icons; VACUUM;");
         let _ = fs::remove_file(self.dir.join("session.json"));
         let _ = fs::remove_file(self.dir.join("skeleton.json"));
+    }
+
+    /// Icons that sites declare in their pages (for sites without /favicon.ico):
+    /// host -> icon URL, or "" when the site has none.
+    pub fn icons(&self) -> Vec<(String, String)> {
+        let Ok(mut q) = self.db.prepare("SELECT host, url FROM icons") else { return Vec::new() };
+        q.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Remember a site's icon; true if it changed.
+    pub fn set_icon(&self, host: &str, url: &str) -> bool {
+        let old: Option<String> = self.db.query_row("SELECT url FROM icons WHERE host=?1", [host], |r| r.get(0)).ok();
+        if old.as_deref() == Some(url) {
+            return false;
+        }
+        let _ = self.db.execute("INSERT OR REPLACE INTO icons(host, url) VALUES(?1, ?2)", [host, url]);
+        true
     }
 
     /// How much is saved: (bookmarks, folders, history entries).

@@ -102,6 +102,50 @@ pub fn fetch_image(url: &str) -> Option<String> {
     Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
+/// The icon a site's homepage declares (`<link rel="icon" href=...>`), as an absolute URL.
+pub fn find_icon(host: &str) -> Option<String> {
+    let base = url::Url::parse(&format!("https://{host}/")).ok()?;
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(6))).build().into();
+    let mut r = agent
+        .get(base.as_str())
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .call()
+        .ok()?;
+    let html = r.body_mut().with_config().limit(1024 * 1024).read_to_string().ok()?;
+    let lower = html.to_ascii_lowercase();
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let t = tag.to_ascii_lowercase();
+        let i = t.find(&format!("{name}="))? + name.len() + 1;
+        let rest = &tag[i..];
+        let (q, rest) = match rest.chars().next()? {
+            c @ ('"' | '\'') => (c, &rest[1..]),
+            _ => (' ', rest),
+        };
+        let end = rest.find(|c: char| c == q || (q == ' ' && c == '>')).unwrap_or(rest.len());
+        Some(rest[..end].replace("&amp;", "&"))
+    };
+    // Best first: a plain icon, then a shortcut icon, then the apple-touch one.
+    let mut found: Vec<(u8, String)> = Vec::new();
+    let mut at = 0;
+    while let Some(i) = lower[at..].find("<link") {
+        let start = at + i;
+        let end = lower[start..].find('>').map_or(lower.len(), |e| start + e);
+        let tag = &html[start..end];
+        at = end;
+        let Some(rel) = attr(tag, "rel").map(|r| r.to_ascii_lowercase()) else { continue };
+        let rank = match rel.as_str() {
+            "icon" => 0,
+            r if r.contains("icon") && !r.contains("mask") => if r.contains("apple") { 2 } else { 1 },
+            _ => continue,
+        };
+        if let Some(href) = attr(tag, "href").filter(|h| !h.is_empty() && !h.starts_with("data:")) {
+            found.push((rank, href));
+        }
+    }
+    found.sort_by_key(|f| f.0);
+    found.into_iter().find_map(|(_, h)| base.join(&h).ok()).map(|u| u.to_string())
+}
+
 pub fn host_of(u: &str) -> String {
     url::Url::parse(u)
         .ok()
