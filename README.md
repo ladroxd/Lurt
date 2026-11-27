@@ -6,7 +6,7 @@
   <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe"><img src="assets/readme/download.svg" width="300" alt="Download Lurt for Windows"></a>
 </p>
 <p align="center">
-  <img src="assets/readme/version.svg" alt="Version 0.8.7">
+  <img src="assets/readme/version.svg" alt="Version 0.8.8">
   <img src="assets/readme/windows.svg" alt="Windows 10 and 11">
   <img src="assets/readme/size.svg" alt="About 6 MB">
   <img src="assets/readme/rust.svg" alt="Made with Rust">

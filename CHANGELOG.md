@@ -8,6 +8,16 @@ All notable changes to Lurt are listed here, newest first.
 ### Changed
 ### Fixed
 
+## [0.8.8] - 2026-11-27
+
+### Added
+
+- Tab volume: a speaker on tabs that make sound (click to mute), and a toolbar mixer with a volume slider and mute for each of them, on top of the site's own volume.
+
+### Fixed
+
+- Sites like Discord showed a colored letter instead of their icon on the bookmarks bar, on restored or sleeping tabs, and in history, suggestions and the favourites list.
+
 ## [0.8.7] - 2026-11-27
 
 ### Added

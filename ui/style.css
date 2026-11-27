@@ -156,6 +156,11 @@ input:focus-visible, textarea:focus-visible { outline: none; }
 .tab.narrow .title, .tab.narrow .x { display: none; }
 .tab.narrow.active .x { display: grid; }
 .tab.narrow.active .fav { display: none; }
+.tab .snd { display: none; flex: none; width: 22px; height: 22px; margin-right: -6px; border-radius: 7px; place-items: center; color: var(--fg2); }
+.tab.sounds .snd { display: grid; }
+.tab .snd .i { width: 14px; height: 14px; }
+.tab .snd:hover { background: var(--press); color: rgb(var(--fg)); }
+.tab.narrow .snd { display: none; }
 
 .fav { width: 16px; height: 16px; display: grid; place-items: center; flex: none; }
 .fav img { width: 16px; height: 16px; border-radius: 4px; }
@@ -748,6 +753,20 @@ body.private.blank #start::before {
   background: rgba(139, 92, 246, .16); border: 1px solid rgba(167, 139, 250, .35);
 }
 body.private #omni { box-shadow: 0 0 0 1px rgba(167, 139, 250, .35) inset; }
+
+/* Tab volume: toolbar button (only while there is sound) and its mixer */
+#vol { display: none; }
+#vol.on { display: grid; }
+#vol-pop { position: fixed; z-index: 20; width: 320px; padding: 12px 10px 10px; display: none; }
+body.vol-open #vol-pop { display: block; animation: pop .2s var(--ease); }
+#vol-pop .head { padding: 0 6px 8px; font-size: 13.5px; }
+.vol-list { max-height: 300px; overflow-y: auto; }
+.vol-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+.vol-row .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.vol-row .t { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vol-row input { width: 100%; }
+.vol-row .val { width: 40px; flex: none; text-align: right; font-size: 11.5px; color: var(--fg3); font-variant-numeric: tabular-nums; }
+.vol-row.quiet input { opacity: .45; }
 
 /* Downloads: toolbar button with a progress ring, and its panel */
 #dl { position: relative; }

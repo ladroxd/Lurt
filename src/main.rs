@@ -52,6 +52,8 @@ pub enum Ev {
     Load(u32, bool, String),
     Source(u32, String),
     History(u32),
+    /// A page started or stopped playing sound: (tab, playing).
+    Audio(u32, bool),
     /// (opener tab, url): a page opened a link in a new tab.
     NewTab(u32, String),
     /// A page was zoomed: (tab, percent).
@@ -448,6 +450,7 @@ impl App {
                     "asleep": t.view.is_none() && !t.url.is_empty(),
                     "shown": t.view.is_some() && t.shown,
                     "private": t.private,
+                    "audible": t.audible && t.view.is_some(), "muted": t.muted, "volume": t.volume,
                 })
             })
             .collect();
@@ -657,6 +660,10 @@ impl App {
         t.blocked_log.clear();
         t.shown = false;
         t.reveal_by = t.view.is_some().then(|| Instant::now() + Duration::from_millis(2500));
+        t.audible = false;
+        if let Some(v) = &t.view {
+            tabs::set_sound(v, t.volume, t.muted);
+        }
         self.layout_tabs();
     }
 
@@ -822,6 +829,7 @@ impl App {
             t.view = None;
             t.shown = false;
             t.reveal_by = None;
+            t.audible = false;
             t.url.clear();
             t.title.clear();
             t.fav.clear();
@@ -1215,6 +1223,12 @@ impl App {
                     self.push_state();
                 }
             }
+            Ev::Audio(id, on) => {
+                if let Some(t) = self.tab_mut(id) {
+                    t.audible = on;
+                    self.push_state();
+                }
+            }
             Ev::History(id) => {
                 let Some(t) = self.tab_mut(id) else { return };
                 if let Some(v) = &t.view {
@@ -1420,6 +1434,14 @@ impl App {
         // Websites can post here too, so only a few harmless messages are accepted.
         let Ok(m) = serde_json::from_str::<Value>(raw) else { return };
         match m["t"].as_str().unwrap_or("") {
+            // A new document: give it the tab's volume.
+            "volumeAsk" => {
+                if let Some(t) = self.tab(id).filter(|t| t.volume != 100) {
+                    if let Some(v) = &t.view {
+                        tabs::set_sound(v, t.volume, t.muted);
+                    }
+                }
+            }
             "key" if id == self.active => {
                 let k = m["k"].as_str().unwrap_or("").to_string();
                 self.shortcut(&k);
@@ -1493,6 +1515,21 @@ impl App {
             }
             "close" => self.close_tab(id),
             "activate" => self.activate(id),
+            // Volume and/or mute for one tab.
+            "sound" => {
+                if let Some(t) = self.tab_mut(id) {
+                    if let Some(v) = m["volume"].as_u64() {
+                        t.volume = v.min(100) as u8;
+                    }
+                    if let Some(on) = m["muted"].as_bool() {
+                        t.muted = on;
+                    }
+                    if let Some(v) = &t.view {
+                        tabs::set_sound(v, t.volume, t.muted);
+                    }
+                    self.push_state();
+                }
+            }
             "tabOrder" => {
                 let ids: Vec<u64> = m["ids"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
                 // Tabs the UI didn't list (opened while dragging) go to the end.

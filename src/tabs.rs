@@ -7,7 +7,7 @@ use tao::{event_loop::EventLoopProxy, window::Window};
 use webview2_com::{
     CapturePreviewCompletedHandler, ContainsFullScreenElementChangedEventHandler,
     BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler, DownloadStartingEventHandler,
-    HistoryChangedEventHandler, StateChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
+    HistoryChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
     NavigationCompletedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
     SourceChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
 };
@@ -24,6 +24,7 @@ use wry::{
 use crate::{Ev, blocker::Shield, util};
 
 const CONTENT_JS: &str = include_str!("content.js");
+const VOLUME_JS: &str = include_str!("volume.js");
 
 pub struct Tab {
     pub id: u32,
@@ -48,6 +49,11 @@ pub struct Tab {
     pub reveal_by: Option<Instant>,
     /// A private tab: its own cookies (gone when the last private tab closes), no history.
     pub private: bool,
+    /// The page is playing sound (even if you muted it).
+    pub audible: bool,
+    pub muted: bool,
+    /// Lurt's volume for this tab, 0..=100, on top of the site's own.
+    pub volume: u8,
 }
 
 impl Tab {
@@ -68,6 +74,9 @@ impl Tab {
             shown: false,
             reveal_by: None,
             private: false,
+            audible: false,
+            muted: false,
+            volume: 100,
         }
     }
 }
@@ -278,6 +287,7 @@ pub fn create(
         .with_visible(opts.visible)
         .with_focused(opts.visible)
         .with_initialization_script_for_main_only(CONTENT_JS, true)
+        .with_initialization_script_for_main_only(VOLUME_JS, false)
         .with_initialization_script_for_main_only(opts.script.unwrap_or_default(), false)
         .with_ipc_handler(ipc)
         .with_document_title_changed_handler(title)
@@ -610,6 +620,22 @@ unsafe fn hook(
             &mut token,
         )?;
 
+        // --- sound ---
+        if let Ok(w8) = wv.cast::<ICoreWebView2_8>() {
+            let p = proxy.clone();
+            w8.add_IsDocumentPlayingAudioChanged(
+                &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+                    if let Some(w) = sender.and_then(|s| s.cast::<ICoreWebView2_8>().ok()) {
+                        let mut on = BOOL(0);
+                        w.IsDocumentPlayingAudio(&mut on)?;
+                        let _ = p.send_event(Ev::Audio(id, on.as_bool()));
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+
         // --- zoom (Ctrl + scroll and friends) ---
         let p = proxy.clone();
         view.controller().add_ZoomFactorChanged(
@@ -671,6 +697,18 @@ pub fn set_tracking(view: &WebView, level: &str) {
             eprintln!("lurt: tracking prevention: {e}");
         }
     }
+}
+
+/// Apply a tab's volume (0..=100) and mute to its page. Silence uses the engine's own mute,
+/// which also covers anything the volume script can't reach.
+pub fn set_sound(view: &WebView, volume: u8, muted: bool) {
+    unsafe {
+        if let Ok(w) = view.webview().cast::<ICoreWebView2_8>() {
+            let _ = w.SetIsMuted(muted || volume == 0);
+        }
+    }
+    let factor = f64::from(volume.min(100)) / 100.0;
+    let _ = view.evaluate_script(&format!("window.__lurtVolume&&window.__lurtVolume({factor})"));
 }
 
 pub fn is_playing_audio(view: &WebView) -> bool {

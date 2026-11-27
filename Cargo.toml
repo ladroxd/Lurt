@@ -1,6 +1,6 @@
 [package]
 name = "lurt"
-version = "0.8.7"
+version = "0.8.8"
 edition = "2024"
 description = "A light, fast, glass-styled web browser"
 license = "MIT"

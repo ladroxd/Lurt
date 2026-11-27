@@ -49,6 +49,8 @@ const P = {
   external: '<path d="M13.5 5.5h5v5M18.5 5.5L11 13M17 13.5V18a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4.5"/>',
   download: '<path d="M12 4.5v11M7 11l5 5 5-5M5 19.5h14"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  sound: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  soundOff: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5"/>',
   eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
 };
 // The Lurt logo (assets/lurt.svg): two clear-glass bars crossing into an L.
@@ -94,7 +96,7 @@ const H = {
   state(m) {
     Object.assign(S, m);
     brandFromTabs();
-    renderTabs(); renderBar(); renderStart();
+    renderTabs(); renderBar(); renderStart(); renderVol();
     // First real frame is on screen: let the native startup skeleton fade out.
     if (!S.painted) { S.painted = true; requestAnimationFrame(() => requestAnimationFrame(() => send({ t: 'painted' }))); }
   },
@@ -189,7 +191,8 @@ function favHtml(t) {
   if (t.loading) return '<i class="spin"></i>';
   if (!t.url) return icon('sparkle');
   if (t.fav) return `<img src="${esc(t.fav)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{innerHTML:${esc(JSON.stringify(letter(t.url, t.title)))}}).firstChild)">`;
-  return letter(t.url, t.title);
+  const host = /^https?:/i.test(t.url) ? hostOf(t.url) : '';
+  return host ? iconImg(host, letter(t.url, t.title)) : letter(t.url, t.title);
 }
 function renderTabs() {
   const list = $('#tablist');
@@ -201,7 +204,7 @@ function renderTabs() {
       el = document.createElement('div');
       el.className = 'tab enter lens';
       el.dataset.id = t.id;
-      el.innerHTML = `<span class="fav"></span><span class="title"></span><button class="x" title="Close (Ctrl+W)">${icon('x')}</button>`;
+      el.innerHTML = `<span class="fav"></span><span class="title"></span><button class="snd"></button><button class="x" title="Close (Ctrl+W)">${icon('x')}</button>`;
       el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
       tabEls.set(t.id, el);
     }
@@ -212,7 +215,16 @@ function renderTabs() {
     el.classList.toggle('private', !!t.private);
     const title = t.title || (t.url ? pretty(t.url) : 'New tab');
     if (el._title !== title) { el._title = title; el.title = title; el.querySelector('.title').textContent = title; }
-    const fk = t.loading ? 'spin' : `${t.url}|${t.fav}|${!!t.private}`;
+    const fk = t.loading ? 'spin' : `${t.url}|${t.fav}|${!!t.private}|${S.icons?.[hostOf(t.url)] ?? ''}`;
+    const quiet = t.muted || t.volume === 0;
+    const sk = t.audible || t.muted || t.volume < 100 ? (quiet ? 'soundOff' : 'sound') : '';
+    if (el._snd !== sk) {
+      el._snd = sk;
+      const b = el.querySelector('.snd');
+      b.innerHTML = sk ? icon(sk) : '';
+      b.title = quiet ? 'Unmute tab' : 'Mute tab';
+      el.classList.toggle('sounds', !!sk);
+    }
     if (el._fav !== fk) { el._fav = fk; el.querySelector('.fav').innerHTML = t.private && !t.url && !t.loading ? icon('mask') : favHtml(t); }
   });
   for (const [id, el] of tabEls) if (!seen.has(id)) { el.remove(); tabEls.delete(id); }
@@ -225,7 +237,7 @@ $('#tablist').addEventListener('mousedown', (e) => {
   const id = +el.dataset.id;
   if (e.button === 1) { e.preventDefault(); send({ t: 'close', id }); return; }
   if (e.button !== 0) return;
-  if (e.target.closest('.x')) return;
+  if (e.target.closest('.x, .snd')) return;
   if (id !== S.active) send({ t: 'activate', id });
   tabDrag = { el, id, x: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, on: false };
 });
@@ -273,6 +285,8 @@ function endTabDrag() {
 addEventListener('mouseup', endTabDrag);
 addEventListener('blur', endTabDrag);
 $('#tablist').addEventListener('click', (e) => {
+  const snd = e.target.closest('.snd');
+  if (snd) { toggleMute(+snd.closest('.tab').dataset.id); return; }
   const x = e.target.closest('.x'); if (!x) return;
   send({ t: 'close', id: +x.closest('.tab').dataset.id });
 });
@@ -624,7 +638,7 @@ function renderSugg(items) {
   S.rows = [first, ...items.map((i) => ({ kind: 'url', icon: 'globe', t: i.title || pretty(i.url), u: pretty(i.url), url: i.url }))];
   S.sel = Math.min(S.sel, S.rows.length - 1);
   sugg.innerHTML = S.rows.map((r, i) =>
-    `<div class="row${i === S.sel ? ' sel' : ''}" data-i="${i}">${r.kind === 'url' ? `<span class="fav">${letter(r.url, r.t)}</span>` : icon(r.icon)}` +
+    `<div class="row${i === S.sel ? ' sel' : ''}" data-i="${i}">${r.kind === 'url' ? `<span class="fav">${knownIcon(r.url, r.t)}</span>` : icon(r.icon)}` +
     `<div class="txt"><span class="t">${esc(r.t)}</span><span class="u">${esc(r.u)}</span></div></div>`).join('');
   placeSugg();
   sugg.classList.add('has');
@@ -765,12 +779,20 @@ function iconMiss(host) {
   send({ t: 'findIcon', host });
 }
 let iconT = 0;
-H.icons = (m) => { S.icons = m.map || {}; renderTiles(); };
+H.icons = (m) => { S.icons = m.map || {}; redrawIcons(); };
 H.icon = (m) => {
   S.icons[m.host] = m.url;
   clearTimeout(iconT);
-  iconT = setTimeout(() => { renderTiles(); if (typeof renderBmBar === 'function') renderBmBar(); }, 200);
+  iconT = setTimeout(redrawIcons, 200);
 };
+function redrawIcons() { renderTiles(); renderBmBar(); renderTabs(); }
+// For long lists (history, suggestions): an icon Lurt already knows, else the letter,
+// without asking every listed site for one.
+function knownIcon(url, title) {
+  const src = S.icons[hostOf(url)];
+  const fallback = letter(url, title);
+  return src ? `<img src="${esc(src)}" alt="" onerror="this.outerHTML=${esc(JSON.stringify(fallback))}">` : fallback;
+}
 function renderTiles() {
   S.tiles = tileList();
   $('#tiles').innerHTML = S.tiles.map((i, n) => {
@@ -1281,7 +1303,7 @@ function renderList(kind, items) {
     }
     const time = kind === 'history' ? new Date(i.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const picked = kind === 'history' && S.hsel.has(i.url);
-    html += `<div class="row${picked ? ' picked' : ''}" data-url="${esc(i.url)}" title="${esc(i.url)}"><span class="fav">${letter(i.url, i.title)}<i class="tick">${icon('check')}</i></span>` +
+    html += `<div class="row${picked ? ' picked' : ''}" data-url="${esc(i.url)}" title="${esc(i.url)}"><span class="fav">${knownIcon(i.url, i.title)}<i class="tick">${icon('check')}</i></span>` +
       `<div class="txt"><span class="t">${esc(i.title || pretty(i.url))}</span><span class="u">${esc(hostOf(i.url))}</span></div>` +
       `<span class="end">${time}</span><button class="icon sm del" title="Remove">${icon('x')}</button></div>`;
   }
@@ -1541,6 +1563,7 @@ function openSettings(sec) {
   hideMenu();
   if (S.overlay === 'shield-open') closeShield(false);
   if (S.overlay === 'omni-open') box.blur();
+  closeVol(false);
   if (!settingsOpen()) openOverlay('settings-open');
   renderSetNav();
   renderSettings(true);
@@ -1798,7 +1821,7 @@ function field(it, s) {
     }
     case 'shortcuts': {
       const list = s.shortcuts || [];
-      let h = list.map((p, i) => `<div class="lrow"><span class="fav">${letter(p.url, p.title)}</span>` +
+      let h = list.map((p, i) => `<div class="lrow"><span class="fav">${iconImg(hostOf(p.url), letter(p.url, p.title))}</span>` +
         `<div class="txt"><span class="t">${esc(p.title || hostOf(p.url))}</span><span class="u">${esc(pretty(p.url))}</span></div>` +
         `<button class="icon sm" data-sc-edit="${i}" title="Edit">${icon('edit')}</button>` +
         `<button class="icon sm" data-sc-del="${i}" title="Remove">${icon('trash')}</button></div>`).join('');
@@ -2352,6 +2375,78 @@ addEventListener('mousedown', (e) => {
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'dl-open') { e.preventDefault(); closeDl(true); } });
 addEventListener('resize', () => S.overlay === 'dl-open' && placeDl());
 send({ t: 'downloads' });
+
+// ---- tab volume --------------------------------------------------------------
+// A mixer for the tabs that make sound, or that you turned down.
+const volBtn = $('#vol'); const volPop = $('#vol-pop');
+const soundTabs = () => S.tabs.filter((t) => t.audible || t.muted || t.volume < 100);
+function setSound(id, change) {
+  const t = S.tabs.find((x) => x.id === id); if (!t) return;
+  Object.assign(t, change);
+  send({ t: 'sound', id, ...change });
+  renderTabs(); renderVol();
+}
+function toggleMute(id) {
+  const t = S.tabs.find((x) => x.id === id); if (!t) return;
+  // Unmuting a tab that was slid to zero brings the sound back too.
+  if (t.muted || t.volume === 0) setSound(id, { muted: false, volume: t.volume || 100 });
+  else setSound(id, { muted: true });
+}
+function renderVol() {
+  const list = soundTabs();
+  volBtn.classList.toggle('on', list.length > 0);
+  const silent = list.length > 0 && list.every((t) => t.muted || t.volume === 0);
+  if (volBtn._silent !== silent) { volBtn._silent = silent; volBtn.innerHTML = icon(silent ? 'soundOff' : 'sound'); }
+  if (S.overlay !== 'vol-open') return;
+  if (!list.length || volPop._tab !== S.active) { closeVol(false); return; }
+  // Rebuild only when the set of tabs changes, so a slider you're dragging stays put.
+  const key = list.map((t) => t.id).join();
+  if (volPop._key !== key) {
+    volPop._key = key;
+    volPop.innerHTML = '<div class="head"><b>Tab volume</b></div><div class="vol-list">' + list.map((t) =>
+      `<div class="vol-row" data-id="${t.id}"><button class="icon sm" data-mute></button><div class="txt"><span class="t"></span>` +
+      '<input type="range" min="0" max="100" aria-label="Volume"></div><span class="val"></span></div>').join('') + '</div>';
+  }
+  for (const t of list) {
+    const row = volPop.querySelector(`.vol-row[data-id="${t.id}"]`);
+    const quiet = t.muted || t.volume === 0;
+    const range = row.querySelector('input');
+    row.classList.toggle('quiet', quiet);
+    row.querySelector('.t').textContent = t.title || pretty(t.url) || 'New tab';
+    if (+range.value !== t.volume) range.value = t.volume;
+    range.style.setProperty('--p', t.volume + '%');
+    row.querySelector('.val').textContent = quiet ? 'Muted' : t.volume + '%';
+    const b = row.querySelector('[data-mute]');
+    if (b._quiet !== quiet) { b._quiet = quiet; b.innerHTML = icon(quiet ? 'soundOff' : 'sound'); b.title = quiet ? 'Unmute' : 'Mute'; }
+  }
+}
+function placeVol() {
+  const r = volBtn.getBoundingClientRect();
+  volPop.style.top = r.bottom + 8 + 'px';
+  volPop.style.left = Math.max(8, Math.min(r.right - 320 + 6, innerWidth - 328)) + 'px';
+}
+function openVol() {
+  if (settingsOpen() || !soundTabs().length) return;
+  if (S.overlay === 'omni-open') box.blur();
+  if (S.overlay === 'bm-open') closeBmMenus();
+  if (S.overlay) closeOverlay(false);
+  volPop._key = ''; volPop._tab = S.active;
+  openOverlay('vol-open');
+  renderVol(); placeVol();
+}
+function closeVol(focusPage) { if (S.overlay === 'vol-open') closeOverlay(focusPage); }
+volBtn.onclick = () => (S.overlay === 'vol-open' ? closeVol(true) : openVol());
+volPop.addEventListener('input', (e) => {
+  const row = e.target.closest('.vol-row'); if (row) setSound(+row.dataset.id, { volume: +e.target.value, muted: false });
+});
+volPop.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mute]'); if (b) toggleMute(+b.closest('.vol-row').dataset.id);
+});
+addEventListener('mousedown', (e) => {
+  if (S.overlay === 'vol-open' && !volPop.contains(e.target) && !volBtn.contains(e.target)) closeVol(false);
+}, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'vol-open') { e.preventDefault(); closeVol(true); } });
+addEventListener('resize', () => S.overlay === 'vol-open' && placeVol());
 
 // ---- downloads page (Settings > Downloads), like chrome://downloads ----------------------
 S.dlTab = 'all'; S.dlQ = '';
