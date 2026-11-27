@@ -752,7 +752,8 @@ function hideTile(url) {
 }
 
 // ---- right-click menu --------------------------------------------------------
-const ctx = $('#ctx');
+// Lives at the top level so it stacks above the bookmark folder menus (also top level).
+const ctx = $('#ctx'); document.body.appendChild(ctx);
 function showMenu(x, y, items) {
   ctx._items = items;
   ctx.innerHTML = items.map((it, i) => it === '-' ? '<hr>'
