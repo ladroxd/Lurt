@@ -47,7 +47,8 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] Drag and drop files from Explorer onto the window to open them (needs the WebView2 file path from `postMessageWithAdditionalObjects`).
 - [ ] "Open file…" (Ctrl+O) with a Windows file picker.
 - [ ] Register Lurt as a handler for `.pdf`, `.html` and image files ("Open with").
-- [ ] Downloads: a downloads panel with progress, open and show in folder.
+- [ ] Downloads: ask where to save each file (a setting), and choose the download folder.
+- [ ] Downloads: open a file automatically when it finishes, per file type.
 - [ ] Find in page (Ctrl+F) styled like the rest of the UI.
 - [ ] Zoom controls (Ctrl+plus, Ctrl+minus, Ctrl+0) with a zoom indicator.
 
@@ -76,3 +77,4 @@ These work in tests and screenshots but need a real mouse and keyboard to confir
 - [ ] Secure DNS with Quad9, Mullvad or Google (the Cloudflare test page only detects Cloudflare).
 - [ ] Private tab: sign in to a site, close every private tab, open a new one: you're signed out.
 - [ ] Opening YouTube or Twitch shows the tinted, breathing loading screen with just the site name.
+- [ ] Downloads panel on real sites: download a big file, pause, resume, open it and show it in its folder.

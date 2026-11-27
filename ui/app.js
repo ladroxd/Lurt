@@ -19,6 +19,9 @@ const P = {
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   star: '<path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z"/>',
   shield: '<path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.9-7 9-4-1.1-7-4.7-7-9V6.3z"/><path d="M9 12l2 2 4-4"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>',
+  pause: '<path d="M9 6.5v11M15 6.5v11"/>',
+  play: '<path d="M8.5 6v12l9.5-6z"/>',
   mask: '<path d="M3.5 9.5c0-1.4 1.1-2.5 2.5-2.5h12c1.4 0 2.5 1.1 2.5 2.5v1c0 3.3-2.2 6-5 6-1.6 0-2.4-1.5-3.5-1.5S10.1 16.5 8.5 16.5c-2.8 0-5-2.7-5-6z"/><circle cx="8.5" cy="11" r="1.4"/><circle cx="15.5" cy="11" r="1.4"/>',
   shieldOff: '<path d="M12 3.5l7 2.8v5.2c0 4.3-3 7.9-7 9-4-1.1-7-4.7-7-9V6.3z"/><path d="M4 4l16 16"/>',
   menu: '<path d="M5 9h14M5 15h9"/>',
@@ -2068,3 +2071,135 @@ function saveSkeleton() {
   }, 1500);
 }
 new MutationObserver(saveSkeleton).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+
+// ---- downloads ---------------------------------------------------------------
+// Lurt handles downloads itself (no engine pop-up): a toolbar button with a progress ring,
+// and a panel with pause, resume, cancel, open and show in folder.
+const dlBtn = $('#dl'); const dlPop = $('#dl-pop');
+dlBtn.innerHTML = `${icon('download')}<i class="ring"></i><span class="n"></span>`;
+S.dl = []; S.dlSpeed = new Map();
+const active = (d) => d.state === 'progress' || d.state === 'paused';
+function fmtBytes(n) {
+  if (!(n > 0)) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
+}
+function fmtTime(s) {
+  if (!isFinite(s) || s < 0) return '';
+  if (s < 60) return `${Math.max(1, Math.round(s))} s left`;
+  if (s < 3600) return `${Math.round(s / 60)} min left`;
+  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`;
+}
+function dlStatus(d) {
+  const sp = S.dlSpeed.get(d.id);
+  const size = d.total > 0 ? `${fmtBytes(d.recv)} of ${fmtBytes(d.total)}` : fmtBytes(d.recv);
+  switch (d.state) {
+    case 'progress': {
+      if (!sp || !sp.bps) return size;
+      const left = d.total > 0 ? fmtTime((d.total - d.recv) / sp.bps) : '';
+      return [size, `${fmtBytes(sp.bps)}/s`, left].filter(Boolean).join(' · ');
+    }
+    case 'paused': return `Paused · ${size}`;
+    case 'done': return d.gone ? 'Moved or deleted' : `${fmtBytes(d.total || d.recv)} · ${hostOf(d.url) || 'Done'}`;
+    case 'canceled': return 'Canceled';
+    default: return d.reason || 'Failed';
+  }
+}
+function dlRow(d) {
+  const ext = (d.name.match(/\.([a-z0-9]{1,5})$/i) || [, ''])[1].toUpperCase() || 'FILE';
+  const pct = d.total > 0 ? Math.min(100, (d.recv / d.total) * 100) : 0;
+  const b = (a, ic, title) => `<button class="icon sm" data-dl="${a}" title="${title}">${icon(ic)}</button>`;
+  const acts = active(d)
+    ? (d.state === 'paused' ? b('Resume', 'play', 'Resume') : b('Pause', 'pause', 'Pause')) + b('Cancel', 'x', 'Cancel')
+    : d.state === 'done'
+      ? (d.gone ? '' : b('Show', 'folder', 'Show in folder')) + b('Remove', 'x', 'Remove from list')
+      : b('Retry', 'refresh', 'Try again') + b('Remove', 'x', 'Remove from list');
+  return `<div class="dl-row ${d.state}${d.gone ? ' gone' : ''}" data-id="${d.id}" title="${esc(d.path)}">` +
+    `<span class="dl-ic">${esc(ext)}</span>` +
+    `<div class="dl-txt"><b>${esc(d.name)}</b><small>${esc(dlStatus(d))}</small>` +
+    (active(d) ? `<i class="bar ${d.total > 0 ? '' : 'indef'}"><i style="width:${pct}%"></i></i>` : '') + '</div>' +
+    `<div class="dl-acts">${acts}</div></div>`;
+}
+function renderDlBtn() {
+  const act = S.dl.filter(active);
+  dlBtn.classList.toggle('busy', act.length > 0);
+  const tot = act.reduce((a, d) => a + Math.max(0, d.total), 0), got = act.reduce((a, d) => a + d.recv, 0);
+  dlBtn.style.setProperty('--p', tot > 0 ? `${(got / tot) * 100}%` : '25%');
+  dlBtn.classList.toggle('indef', act.length > 0 && !(tot > 0));
+  dlBtn.querySelector('.n').textContent = act.length > 1 ? act.length : '';
+  dlBtn.title = act.length ? `Downloads: ${act.length} in progress` : 'Downloads';
+}
+function renderDlPop() {
+  const finished = S.dl.some((d) => !active(d));
+  const head = `<div class="dl-head"><b>Downloads</b><span>` +
+    (finished ? `<button class="link" data-dlall="clear">Clear list</button>` : '') +
+    `<button class="icon sm" data-dlall="folder" title="Open Downloads folder">${icon('folder')}</button></span></div>`;
+  const body = S.dl.length ? `<div class="dl-list">${S.dl.map(dlRow).join('')}</div>`
+    : `<div class="dl-empty">${icon('download')}<span>Files you download appear here</span></div>`;
+  dlPop.innerHTML = head + body;
+}
+// Update rows in place while the panel is open, so buttons stay clickable during progress.
+function patchDlPop() {
+  const list = dlPop.querySelector('.dl-list');
+  const rows = list ? [...list.children] : [];
+  if (!list || rows.length !== S.dl.length || rows.some((r, i) => +r.dataset.id !== S.dl[i].id)) { renderDlPop(); return; }
+  S.dl.forEach((d, i) => {
+    const r = rows[i];
+    if (!r.classList.contains(d.state) || r.classList.contains('gone') !== !!d.gone) { r.outerHTML = dlRow(d); return; }
+    r.querySelector('small').textContent = dlStatus(d);
+    const bar = r.querySelector('.bar > i');
+    if (bar && d.total > 0) bar.style.width = Math.min(100, (d.recv / d.total) * 100) + '%';
+  });
+}
+H.downloads = (m) => {
+  const now = performance.now();
+  for (const d of m.list) {
+    if (d.state !== 'progress') { S.dlSpeed.delete(d.id); continue; }
+    const p = S.dlSpeed.get(d.id);
+    if (!p) { S.dlSpeed.set(d.id, { recv: d.recv, t: now, bps: 0 }); continue; }
+    const dt = (now - p.t) / 1000;
+    if (dt >= 0.2) {
+      const inst = Math.max(0, (d.recv - p.recv) / dt);
+      S.dlSpeed.set(d.id, { recv: d.recv, t: now, bps: p.bps ? p.bps * 0.7 + inst * 0.3 : inst });
+    }
+  }
+  S.dl = m.list;
+  renderDlBtn();
+  if (S.overlay === 'dl-open') patchDlPop();
+};
+function dlPulse(cls) { dlBtn.classList.remove('pulse', 'done-pulse'); void dlBtn.offsetWidth; dlBtn.classList.add(cls); }
+H.dlStart = () => dlPulse('pulse');
+H.dlDone = () => dlPulse('done-pulse');
+dlBtn.addEventListener('animationend', () => dlBtn.classList.remove('pulse', 'done-pulse'));
+function placeDl() {
+  const r = dlBtn.getBoundingClientRect();
+  dlPop.style.top = r.bottom + 8 + 'px';
+  dlPop.style.left = Math.max(8, Math.min(r.right - 360 + 6, innerWidth - 368)) + 'px';
+}
+function openDl() {
+  if (settingsOpen()) return;
+  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'bm-open') closeBmMenus();
+  if (S.overlay) closeOverlay(false);
+  renderDlPop(); placeDl();
+  openOverlay('dl-open');
+  send({ t: 'downloads' });
+}
+function closeDl(focusPage) { if (S.overlay === 'dl-open') closeOverlay(focusPage); }
+dlBtn.onclick = () => (S.overlay === 'dl-open' ? closeDl(true) : openDl());
+dlPop.addEventListener('click', (e) => {
+  const all = e.target.closest('[data-dlall]');
+  if (all) { send({ t: all.dataset.dlall === 'clear' ? 'dlClear' : 'dlFolder' }); if (all.dataset.dlall === 'folder') closeDl(false); return; }
+  const row = e.target.closest('.dl-row'); if (!row) return;
+  const id = +row.dataset.id;
+  const b = e.target.closest('[data-dl]');
+  if (b) { send({ t: 'dl' + b.dataset.dl, id }); if (b.dataset.dl === 'Show') closeDl(false); return; }
+  if (row.classList.contains('done') && !row.classList.contains('gone')) { send({ t: 'dlOpen', id }); closeDl(false); }
+});
+addEventListener('mousedown', (e) => {
+  if (S.overlay === 'dl-open' && !dlPop.contains(e.target) && !dlBtn.contains(e.target)) closeDl(false);
+}, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'dl-open') { e.preventDefault(); closeDl(true); } });
+addEventListener('resize', () => S.overlay === 'dl-open' && placeDl());
+send({ t: 'downloads' });

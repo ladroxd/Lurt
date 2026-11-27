@@ -87,6 +87,28 @@ pub struct Settings {
     pub history_days: u32,
 }
 
+/// A download in the downloads panel.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct Download {
+    pub id: u32,
+    pub name: String,
+    pub path: String,
+    pub url: String,
+    /// Bytes; -1 or 0 when the size is unknown.
+    pub total: i64,
+    pub recv: i64,
+    /// "progress" | "paused" | "done" | "failed" | "canceled"
+    pub state: String,
+    /// Why it failed, in words.
+    pub reason: String,
+    /// Unix seconds when it started.
+    pub at: i64,
+    /// From a private tab: shown but not saved.
+    #[serde(skip)]
+    pub private: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(default)]
 pub struct Shortcut {
@@ -402,6 +424,28 @@ impl Store {
         let _ = self.db.execute_batch("DELETE FROM history; DELETE FROM bookmarks; DELETE FROM bm_folders; DELETE FROM icons; VACUUM;");
         let _ = fs::remove_file(self.dir.join("session.json"));
         let _ = fs::remove_file(self.dir.join("skeleton.json"));
+        let _ = fs::remove_file(self.dir.join("downloads.json"));
+    }
+
+    /// The downloads panel's list, newest first. Downloads cut off by closing Lurt show as failed.
+    pub fn load_downloads(&self) -> Vec<Download> {
+        let mut list: Vec<Download> = fs::read_to_string(self.dir.join("downloads.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        for d in &mut list {
+            if d.state == "progress" || d.state == "paused" {
+                d.state = "failed".into();
+                d.reason = "Lurt was closed".into();
+            }
+        }
+        list
+    }
+    pub fn save_downloads(&self, list: &[Download]) {
+        let keep: Vec<&Download> = list.iter().filter(|d| !d.private).take(100).collect();
+        if let Ok(t) = serde_json::to_string(&keep) {
+            let _ = fs::write(self.dir.join("downloads.json"), t);
+        }
     }
 
     /// Icons that sites declare in their pages (for sites without /favicon.ico):

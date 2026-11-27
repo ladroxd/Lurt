@@ -6,7 +6,8 @@ use std::{rc::Rc, time::Instant};
 use tao::{event_loop::EventLoopProxy, window::Window};
 use webview2_com::{
     CapturePreviewCompletedHandler, ContainsFullScreenElementChangedEventHandler,
-    ClearBrowsingDataCompletedHandler, HistoryChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
+    BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler, DownloadStartingEventHandler,
+    HistoryChangedEventHandler, StateChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
     NavigationCompletedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
     SourceChangedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
@@ -142,6 +143,52 @@ pub fn write_engine_prefs(root: &std::path::Path, s: &crate::store::Settings) {
             w.remove("ip_handling_policy").is_some()
         }
     });
+}
+
+// Downloads in progress, by Lurt's download id (all on the UI thread).
+thread_local! {
+    static DOWNLOADS: std::cell::RefCell<std::collections::HashMap<u32, ICoreWebView2DownloadOperation>> =
+        Default::default();
+}
+static NEXT_DOWNLOAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// Pause, resume or cancel a download in progress.
+pub fn download_op(id: u32, action: &str) {
+    let Some(op) = DOWNLOADS.with(|d| d.borrow().get(&id).cloned()) else { return };
+    unsafe {
+        let _ = match action {
+            "pause" => op.Pause(),
+            "resume" => op.Resume(),
+            _ => op.Cancel(),
+        };
+    }
+}
+pub fn forget_download(id: u32) {
+    DOWNLOADS.with(|d| d.borrow_mut().remove(&id));
+}
+
+/// Why a download stopped, in words.
+fn interrupt_text(r: COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON) -> &'static str {
+    match r {
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_DISCONNECTED => "No internet connection",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_TIMEOUT => "The connection timed out",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED
+        | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_SERVER_DOWN
+        | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NETWORK_INVALID_REQUEST => "Network error",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_NO_SPACE => "Not enough disk space",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED => "Can't save to the Downloads folder",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_NAME_TOO_LONG => "The file name is too long",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_TOO_LARGE => "The file is too large",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS
+        | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED
+        | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY => "Blocked by Windows security",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_UNAUTHORIZED
+        | COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_FORBIDDEN => "The site refused the download",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_SERVER_BAD_CONTENT => "The file isn't on the server",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN => "Lurt was closed",
+        COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_DOWNLOAD_PROCESS_CRASHED => "The download crashed",
+        _ => "Failed",
+    }
 }
 
 /// Cookies, site storage and cache (not passwords, autofill or settings).
@@ -427,6 +474,70 @@ unsafe fn hook(
             })),
             &mut token,
         )?;
+
+        // --- downloads: Lurt shows them in its own panel instead of the engine's pop-up ---
+        if let Ok(w4) = wv.cast::<ICoreWebView2_4>() {
+            let p = proxy.clone();
+            w4.add_DownloadStarting(
+                &DownloadStartingEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    args.SetHandled(true)?;
+                    let op = args.DownloadOperation()?;
+                    let dl = NEXT_DOWNLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let mut s = PWSTR::null();
+                    args.ResultFilePath(&mut s)?;
+                    let path = take_pwstr(s);
+                    let mut s = PWSTR::null();
+                    op.Uri(&mut s)?;
+                    let url = take_pwstr(s);
+                    let mut total = 0i64;
+                    op.TotalBytesToReceive(&mut total)?;
+                    let _ = p.send_event(Ev::DlStart { tab: id, dl, path, url, total });
+
+                    let mut tok = 0i64;
+                    let p2 = p.clone();
+                    op.add_BytesReceivedChanged(
+                        &BytesReceivedChangedEventHandler::create(Box::new(move |op, _| {
+                            if let Some(op) = op {
+                                let (mut r, mut t) = (0i64, 0i64);
+                                op.BytesReceived(&mut r)?;
+                                op.TotalBytesToReceive(&mut t)?;
+                                let _ = p2.send_event(Ev::DlProgress(dl, r, t));
+                            }
+                            Ok(())
+                        })),
+                        &mut tok,
+                    )?;
+                    let p3 = p.clone();
+                    op.add_StateChanged(
+                        &StateChangedEventHandler::create(Box::new(move |op, _| {
+                            let Some(op) = op else { return Ok(()) };
+                            let mut st = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+                            op.State(&mut st)?;
+                            let mut why = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+                            op.InterruptReason(&mut why)?;
+                            let mut s = PWSTR::null();
+                            op.ResultFilePath(&mut s)?;
+                            let (state, reason) = match st {
+                                COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED => ("done", ""),
+                                COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED => match why {
+                                    COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED => ("canceled", ""),
+                                    COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED => ("paused", ""),
+                                    r => ("failed", interrupt_text(r)),
+                                },
+                                _ => ("progress", ""),
+                            };
+                            let _ = p3.send_event(Ev::DlState(dl, state, reason, take_pwstr(s)));
+                            Ok(())
+                        })),
+                        &mut tok,
+                    )?;
+                    DOWNLOADS.with(|d| d.borrow_mut().insert(dl, op));
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
 
         // --- page fullscreen (videos) ---
         let p = proxy.clone();

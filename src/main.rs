@@ -59,6 +59,12 @@ pub enum Ev {
     Cleared,
     /// The icon found on a site's homepage: (host, icon URL or "").
     FoundIcon(String, String),
+    /// A page started a download (the file goes to the Downloads folder).
+    DlStart { tab: u32, dl: u32, path: String, url: String, total: i64 },
+    /// (download, bytes received, total bytes or -1)
+    DlProgress(u32, i64, i64),
+    /// (download, state, why it failed, file path)
+    DlState(u32, &'static str, &'static str, String),
     /// Tab id, blocked request URL, resource type.
     Blocked(u32, String, &'static str),
     Fullscreen(u32, bool),
@@ -125,6 +131,9 @@ struct App {
     exit_cleared: bool,
     /// Per-session seed for fingerprint noise.
     seed: u32,
+    downloads: Vec<store::Download>,
+    /// Progress updates to the UI are batched until then.
+    dl_push_at: Option<Instant>,
 }
 
 /// `LURT_BENCH=1` prints startup timings to stderr, never shows the window,
@@ -149,6 +158,7 @@ fn main() {
     let proxy = event_loop.create_proxy();
 
     let store = Store::open();
+    let downloads = store.load_downloads();
     let settings = store.load_settings();
     mark("store + settings loaded");
 
@@ -279,6 +289,8 @@ fn main() {
         quit: false,
         exit_clear: None,
         exit_cleared: false,
+        downloads,
+        dl_push_at: None,
         seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(7, |d| d.subsec_nanos() ^ d.as_secs() as u32),
     };
     app.restore_session();
@@ -322,12 +334,19 @@ fn main() {
             app.account_at = None;
             account::refresh(&app.chrome, app.proxy.clone());
         }
+        if app.dl_push_at.is_some_and(|t| t <= Instant::now()) {
+            app.dl_push_at = None;
+            app.send_downloads();
+        }
         if app.glass_fix_at.is_some_and(|t| t <= Instant::now()) {
             app.glass_fix_at = None;
             glass::refresh(&app.window);
         }
         let mut wake = app.tabs.iter().filter_map(|t| t.reveal_by).min().map_or(next_tick, |r| r.min(next_tick));
         if let Some(t) = app.glass_fix_at {
+            wake = wake.min(t);
+        }
+        if let Some(t) = app.dl_push_at {
             wake = wake.min(t);
         }
         if let Some(t) = app.account_at.filter(|_| app.ui_ready) {
@@ -978,6 +997,20 @@ impl App {
         self.push_state();
     }
 
+    fn send_downloads(&self) {
+        let exists: Vec<bool> = self.downloads.iter().map(|d| d.state != "done" || std::path::Path::new(&d.path).exists()).collect();
+        let list: Vec<Value> = self
+            .downloads
+            .iter()
+            .zip(exists)
+            .map(|(d, ok)| {
+                json!({ "id": d.id, "name": d.name, "path": d.path, "url": d.url, "total": d.total, "recv": d.recv,
+                        "state": d.state, "reason": d.reason, "at": d.at, "gone": !ok })
+            })
+            .collect();
+        self.send(json!({ "t": "downloads", "list": list }));
+    }
+
     fn remember_icon(&mut self, host: &str, url: &str) {
         if self.store.set_icon(host, url) {
             self.send(json!({ "t": "icon", "host": host, "url": url }));
@@ -1166,6 +1199,47 @@ impl App {
             }
             Ev::Cleared => self.exit_cleared = true,
             Ev::FoundIcon(host, url) => self.remember_icon(&host, &url),
+            Ev::DlStart { tab, dl, path, url, total } => {
+                let name = std::path::Path::new(&path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                let private = self.tab(tab).is_some_and(|t| t.private);
+                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+                self.toast(&format!("Downloading {name}"));
+                self.downloads.insert(0, store::Download {
+                    id: dl, name: name.clone(), path, url, total, recv: 0, state: "progress".into(), reason: String::new(), at, private,
+                });
+                self.send(json!({ "t": "dlStart", "id": dl, "name": name }));
+                self.send_downloads();
+            }
+            Ev::DlProgress(dl, recv, total) => {
+                if let Some(d) = self.downloads.iter_mut().find(|d| d.id == dl) {
+                    d.recv = recv;
+                    d.total = total;
+                }
+                if self.dl_push_at.is_none() {
+                    self.dl_push_at = Some(Instant::now() + Duration::from_millis(250));
+                }
+            }
+            Ev::DlState(dl, state, reason, path) => {
+                let Some(d) = self.downloads.iter_mut().find(|d| d.id == dl) else { return };
+                d.state = state.into();
+                d.reason = reason.into();
+                if !path.is_empty() {
+                    d.path = path;
+                }
+                if state == "done" && d.total <= 0 {
+                    d.total = d.recv;
+                }
+                if matches!(state, "done" | "failed" | "canceled") {
+                    tabs::forget_download(dl);
+                    if state == "done" {
+                        d.recv = d.total.max(d.recv);
+                        let name = d.name.clone();
+                        self.send(json!({ "t": "dlDone", "id": dl, "name": name }));
+                    }
+                }
+                self.store.save_downloads(&self.downloads);
+                self.send_downloads();
+            }
             Ev::Blocked(id, url, kind) => {
                 if let Some(t) = self.tab_mut(id) {
                     t.blocked += 1;
@@ -1579,6 +1653,67 @@ impl App {
                     || {},
                 );
                 self.toast("Cookies, cache and site data cleared");
+            }
+            "downloads" => self.send_downloads(),
+            "dlPause" | "dlResume" | "dlCancel" => {
+                let id = m["id"].as_u64().unwrap_or(0) as u32;
+                tabs::download_op(id, match s("t").as_str() { "dlPause" => "pause", "dlResume" => "resume", _ => "cancel" });
+                // Pausing doesn't always report a state change: show it right away.
+                if let Some(d) = self.downloads.iter_mut().find(|d| d.id == id && (d.state == "progress" || d.state == "paused")) {
+                    match s("t").as_str() {
+                        "dlPause" => d.state = "paused".into(),
+                        "dlResume" => d.state = "progress".into(),
+                        _ => {}
+                    }
+                }
+                self.send_downloads();
+            }
+            "dlOpen" | "dlShow" => {
+                let id = m["id"].as_u64().unwrap_or(0) as u32;
+                let Some(d) = self.downloads.iter().find(|d| d.id == id) else { return };
+                let path = std::path::PathBuf::from(&d.path);
+                if !path.exists() {
+                    self.toast("The file was moved or deleted");
+                    return;
+                }
+                let mut c = std::process::Command::new("explorer");
+                if s("t") == "dlShow" {
+                    c.arg("/select,");
+                }
+                let _ = c.arg(&path).spawn();
+            }
+            "dlFolder" => {
+                let dir = dirs::download_dir().unwrap_or_else(|| self.store.dir.clone());
+                let _ = std::process::Command::new("explorer").arg(dir).spawn();
+            }
+            "dlRetry" => {
+                let id = m["id"].as_u64().unwrap_or(0) as u32;
+                if let Some(url) = self.downloads.iter().find(|d| d.id == id).map(|d| d.url.clone()) {
+                    self.downloads.retain(|d| d.id != id);
+                    match self.active_view() {
+                        Some(v) => {
+                            let _ = v.load_url(&url);
+                        }
+                        None => {
+                            self.new_tab(Some(url), true);
+                        }
+                    }
+                }
+                self.store.save_downloads(&self.downloads);
+                self.send_downloads();
+            }
+            "dlRemove" => {
+                let id = m["id"].as_u64().unwrap_or(0) as u32;
+                tabs::download_op(id, "cancel");
+                tabs::forget_download(id);
+                self.downloads.retain(|d| d.id != id);
+                self.store.save_downloads(&self.downloads);
+                self.send_downloads();
+            }
+            "dlClear" => {
+                self.downloads.retain(|d| d.state == "progress" || d.state == "paused");
+                self.store.save_downloads(&self.downloads);
+                self.send_downloads();
             }
             "icons" => {
                 let map: serde_json::Map<String, Value> = self.store.icons().into_iter().map(|(h, u)| (h, Value::String(u))).collect();
