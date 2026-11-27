@@ -592,6 +592,9 @@ body.settings-open #settings { opacity: 1; pointer-events: auto; transform: tran
 .card .set { padding-left: 2px; padding-right: 2px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #0b1020; font-weight: 600; }
 .btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.zoom { display: flex; align-items: center; gap: 6px; flex: none; }
+.zoom .val { min-width: 44px; text-align: center; color: rgb(var(--fg)); }
+.zoom .btn:disabled { opacity: .4; pointer-events: none; }
 
 /* list rows inside cards (browsers to import, favourites) */
 .lrow { display: flex; align-items: center; gap: 11px; min-height: 46px; padding: 6px 2px; }

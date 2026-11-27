@@ -1,8 +1,9 @@
 [package]
 name = "lurt"
-version = "0.8.6"
+version = "0.8.7"
 edition = "2024"
 description = "A light, fast, glass-styled web browser"
+license = "MIT"
 
 [dependencies]
 adblock = "0.13"

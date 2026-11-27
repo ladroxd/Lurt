@@ -1426,6 +1426,7 @@ const SECTIONS = [
     ['Start over', [{ type: 'wipe', label: 'Delete all browser data', kw: 'clear reset erase wipe everything passwords bookmarks history' }]],
   ] },
   { id: 'appearance', icon: 'palette', title: 'Appearance', groups: [
+    ['Page zoom', [{ type: 'zoom', label: 'Page zoom', desc: 'How big websites are shown. Ctrl + scroll, Ctrl + / - and Ctrl 0 work too', kw: 'scale size text bigger smaller magnify' }]],
     ['Theme', [
       { k: 'theme', label: 'Mode', type: 'seg', opts: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] },
       { k: 'accent', label: 'Accent color', type: 'color' },
@@ -1710,7 +1711,7 @@ function renderTrackers() {
   body.innerHTML = h; body.scrollTop = y;
 }
 const KEYS = [['New tab', 'Ctrl T'], ['New private tab', 'Ctrl Shift N'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
-  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Downloads', 'Ctrl J'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
+  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Downloads', 'Ctrl J'], ['Settings', 'Ctrl ,'], ['Reload', 'F5'], ['Zoom in or out', 'Ctrl Scroll'], ['Reset zoom', 'Ctrl 0']];
 function field(it, s) {
   const label = `<div class="lbl"><b>${esc(it.label)}</b>${it.desc ? `<small>${esc(val(it.desc))}</small>` : ''}</div>`;
   switch (it.type) {
@@ -1722,6 +1723,9 @@ function field(it, s) {
         it.opts.map(([v, l]) => `<button data-v="${v}" class="${s[it.k] === v ? 'on' : ''}">${l}</button>`).join('') +
         `</div>${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
     }
+    case 'zoom':
+      return `<div class="set">${label}<div class="zoom"><button class="btn sm" data-zoom="-1" title="Zoom out">−</button><span class="val">${s.page_zoom}%</span>` +
+        `<button class="btn sm" data-zoom="1" title="Zoom in">+</button><button class="btn sm" data-zoom="0" ${s.page_zoom === 100 ? 'disabled' : ''}>Reset</button></div></div>`;
     case 'range': {
       const p = ((s[it.k] - it.min) / (it.max - it.min)) * 100;
       return `<div class="set col"><div style="display:flex">${label}<span class="val">${s[it.k]}${it.unit}</span></div>` +
@@ -1872,6 +1876,17 @@ function field(it, s) {
   return '';
 }
 
+// The same steps the engine uses for Ctrl + scroll.
+const ZOOMS = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
+// 1 zooms in a step, -1 out, 0 goes back to 100%.
+function stepZoom(dir) {
+  if (!S.settings) return;
+  const now = S.settings.page_zoom;
+  const next = !dir ? 100 : (dir > 0 ? ZOOMS.find((z) => z > now) : [...ZOOMS].reverse().find((z) => z < now)) ?? now;
+  if (next === now) return;
+  setSetting('page_zoom', next, { rerender: settingsOpen() });
+  toast(`Zoom ${next}%`);
+}
 let saveT;
 function setSetting(k, v, { lazy = false, rerender = false } = {}) {
   S.settings[k] = v;
@@ -1965,6 +1980,8 @@ function bindSettings(el, active, ownActions) {
       setSetting('adblock', v.adblock, { rerender: true });
       return;
     }
+    const zm = q('[data-zoom]');
+    if (zm) { stepZoom(+zm.dataset.zoom); return; }
     const sw = q('.sw[data-color]');
     if (sw) { setSetting('accent', sw.dataset.color, { rerender: true }); return; }
     const imp = q('[data-import]');
@@ -1998,6 +2015,8 @@ const FORWARD = new Set(['ctrl+j', 'ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+t
 addEventListener('keydown', (e) => {
   let k = e.key.toLowerCase(); if (k === ',') k = 'comma';
   const c = (e.ctrlKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + (e.shiftKey ? 'shift+' : '') + k;
+  // Zoom keys while the toolbar has the keyboard (pages handle their own).
+  if (e.ctrlKey && !e.altKey && ['=', '+', '-', '0'].includes(e.key)) { e.preventDefault(); stepZoom(e.key === '-' ? -1 : e.key === '0' ? 0 : 1); return; }
   if (FORWARD.has(c)) { e.preventDefault(); send({ t: 'key', k: c }); return; }
   if (c === 'ctrl+l' || c === 'alt+d' || c === 'f6') { e.preventDefault(); addr.focus(); addr.select(); return; }
   if (c === 'ctrl+h') { e.preventDefault(); togglePanel('history'); return; }

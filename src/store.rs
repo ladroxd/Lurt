@@ -28,6 +28,8 @@ pub struct Settings {
     pub reduce_motion: bool,
     pub rounded_pages: bool,
     pub show_clock: bool,
+    /// How big websites are shown, in percent (25..=500). Ctrl + scroll changes it.
+    pub page_zoom: u32,
     /// "duckduckgo" | "google" | "bing" | "brave" | "startpage" | "ecosia" | a URL with %s
     pub search: String,
     /// Empty means the built-in start page.
@@ -148,6 +150,7 @@ impl Default for Settings {
             reduce_motion: false,
             rounded_pages: true,
             show_clock: true,
+            page_zoom: 100,
             search: "google".into(),
             homepage: String::new(),
             restore_session: true,

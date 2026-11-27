@@ -8,6 +8,14 @@ All notable changes to Lurt are listed here, newest first.
 ### Changed
 ### Fixed
 
+## [0.8.7] - 2026-11-27
+
+### Added
+
+- Page zoom: Ctrl + scroll (also Ctrl + / -, Ctrl 0 and touchpad pinch) zooms websites, and Settings > Appearance > Page zoom shows and sets it. One zoom level for all sites, remembered between launches.
+- MIT license, a privacy policy and a code signing policy.
+- Microsoft Store packaging (`packaging/msix.ps1`, see `packaging/STORE.md`); the release workflow builds the package once the Store identity is set.
+
 ## [0.8.6] - 2026-11-27
 
 ### Added

@@ -54,6 +54,8 @@ pub enum Ev {
     History(u32),
     /// (opener tab, url): a page opened a link in a new tab.
     NewTab(u32, String),
+    /// A page was zoomed: (tab, percent).
+    Zoom(u32, u32),
     /// Load this URL in the tab instead: a cleaned link, or an HTTPS upgrade or its fallback.
     Redirect(u32, String),
     /// Browsing data deleted on quit.
@@ -632,7 +634,7 @@ impl App {
         let script = privacy::page_script(s.gpc, s.fingerprint, self.seed);
         let view = tabs::create(
             id,
-            ViewOpts { url: &url, bounds: vp, visible: false, theme, private, script },
+            ViewOpts { url: &url, bounds: vp, visible: false, theme, private, zoom: s.page_zoom, script },
             &mut self.ctx,
             &self.window,
             &self.proxy,
@@ -961,6 +963,11 @@ impl App {
         if old.window_opacity != s.window_opacity {
             glass::set_window_opacity(&self.window, s.window_opacity);
         }
+        if old.page_zoom != s.page_zoom {
+            for v in self.tabs.iter().filter_map(|t| t.view.as_ref()) {
+                tabs::set_zoom(v, s.page_zoom);
+            }
+        }
         if old.theme != s.theme {
             let theme = theme_of(&s.theme);
             let _ = self.chrome.set_theme(theme);
@@ -1215,6 +1222,17 @@ impl App {
                     t.fwd = v.can_go_forward().unwrap_or(false);
                 }
                 self.push_state();
+            }
+            Ev::Zoom(id, percent) => {
+                // Only the page you're looking at can be zoomed by you; other tabs report
+                // the zoom Lurt just gave them.
+                let percent = percent.clamp(25, 500);
+                if id == self.active && percent != self.settings.page_zoom {
+                    let mut s = self.settings.clone();
+                    s.page_zoom = percent;
+                    self.apply_settings(s);
+                    self.toast(&format!("Zoom {percent}%"));
+                }
             }
             Ev::NewTab(from, url) => {
                 // Links from a private tab stay private.

@@ -6,7 +6,7 @@
   <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe"><img src="assets/readme/download.svg" width="300" alt="Download Lurt for Windows"></a>
 </p>
 <p align="center">
-  <img src="assets/readme/version.svg" alt="Version 0.8.6">
+  <img src="assets/readme/version.svg" alt="Version 0.8.7">
   <img src="assets/readme/windows.svg" alt="Windows 10 and 11">
   <img src="assets/readme/size.svg" alt="About 6 MB">
   <img src="assets/readme/rust.svg" alt="Made with Rust">
@@ -48,6 +48,7 @@ Passwords and signed-in sessions can't be imported, because Chromium encrypts th
 | --- | --- |
 | Ctrl+T / Ctrl+W | New / close tab |
 | Ctrl+Shift+T | Reopen closed tab |
+| Ctrl+Scroll, Ctrl+ +/-, Ctrl+0 | Zoom in or out, reset |
 | Ctrl+Tab, Ctrl+1…9 | Switch tabs |
 | Ctrl+L, Alt+D, F6 | Address bar (Alt+Enter opens in a new tab) |
 | Ctrl+D | Bookmark page |
@@ -78,3 +79,11 @@ ui/             the browser interface (HTML/CSS/JS, compiled into the exe)
 ```
 
 Data lives in `%APPDATA%\Lurt` (settings, history, mods) and `%LOCALAPPDATA%\Lurt\WebView` (cookies, cache).
+
+## Code signing policy
+
+Releases are not signed yet. See the [code signing policy](CODE_SIGNING.md).
+
+## Privacy and license
+
+Lurt collects nothing: see the [privacy policy](PRIVACY.md). Released under the [MIT License](LICENSE).

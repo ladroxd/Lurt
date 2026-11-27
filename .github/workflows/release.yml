@@ -79,6 +79,23 @@ jobs:
           $hash = (Get-FileHash lurt.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  lurt.exe" | Out-File -Encoding ascii lurt.exe.sha256
 
+      # For the Microsoft Store: only once the app's Store identity is set (packaging/STORE.md).
+      - name: MSIX package
+        if: vars.MSIX_IDENTITY_NAME != ''
+        shell: pwsh
+        env:
+          IDENTITY: ${{ vars.MSIX_IDENTITY_NAME }}
+          PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          PUBLISHER_NAME: ${{ vars.MSIX_PUBLISHER_NAME }}
+          DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME || 'Lurt' }}
+        run: ./packaging/msix.ps1 -IdentityName $env:IDENTITY -Publisher $env:PUBLISHER -PublisherDisplayName $env:PUBLISHER_NAME -DisplayName $env:DISPLAY_NAME
+
+      - uses: actions/upload-artifact@v4
+        if: vars.MSIX_IDENTITY_NAME != ''
+        with:
+          name: lurt-msix
+          path: target/msix/*.msix
+
       - name: Release notes
         shell: pwsh
         run: |

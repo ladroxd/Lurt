@@ -9,7 +9,7 @@ use webview2_com::{
     BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler, DownloadStartingEventHandler,
     HistoryChangedEventHandler, StateChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
     NavigationCompletedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
-    SourceChangedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
+    SourceChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
 };
 use windows::{
     Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET},
@@ -78,6 +78,8 @@ pub struct ViewOpts<'a> {
     pub visible: bool,
     pub theme: Theme,
     pub private: bool,
+    /// Page zoom in percent.
+    pub zoom: u32,
     /// The privacy script for every frame (see `privacy::page_script`).
     pub script: Option<String>,
 }
@@ -282,6 +284,8 @@ pub fn create(
         .with_on_page_load_handler(load)
         .with_new_window_req_handler(new_window)
         .with_devtools(true)
+        // Ctrl + scroll, Ctrl +/-/0 and touchpad pinch.
+        .with_hotkeys_zoom(true)
         .with_theme(opts.theme)
         .with_scroll_bar_style(wry::ScrollBarStyle::FluentOverlay)
         .build_as_child(window)
@@ -290,6 +294,7 @@ pub fn create(
     if let Err(e) = unsafe { hook(&view, id, proxy.clone(), shield.clone()) } {
         eprintln!("lurt: native hooks failed for tab {id}: {e}");
     }
+    set_zoom(&view, opts.zoom);
     // Load only now, so the first page also gets clean links, HTTPS and privacy headers.
     let _ = view.load_url(opts.url);
     Some(view)
@@ -605,6 +610,20 @@ unsafe fn hook(
             &mut token,
         )?;
 
+        // --- zoom (Ctrl + scroll and friends) ---
+        let p = proxy.clone();
+        view.controller().add_ZoomFactorChanged(
+            &ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(c) = sender {
+                    let mut f = 1.0;
+                    c.ZoomFactor(&mut f)?;
+                    let _ = p.send_event(Ev::Zoom(id, (f * 100.0).round() as u32));
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
         // --- back/forward availability ---
         let p = proxy;
         wv.add_HistoryChanged(
@@ -616,6 +635,11 @@ unsafe fn hook(
         )?;
     }
     Ok(())
+}
+
+/// Show a page at this many percent of its normal size.
+pub fn set_zoom(view: &WebView, percent: u32) {
+    let _ = view.zoom(f64::from(percent.clamp(25, 500)) / 100.0);
 }
 
 /// Password saving and form autofill (WebView2's built-in, stored in the Lurt profile).
