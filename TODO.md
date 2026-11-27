@@ -12,6 +12,15 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [ ] The repo is private: the README download button and releases only work for people with access. Make it public when Lurt should be downloadable by anyone.
 - [ ] For each new version: bump `version` in `Cargo.toml`, add `.github/release-notes/vX.Y.Z.md` (from `TEMPLATE.md`), update the version badge in `README.md`, push `main`.
 
+## Updates
+
+- [ ] **Auto updater.** Check GitHub releases for a newer version than the one running (at startup, then every few hours, and from a "Check for updates" button in Settings > About). Compare versions properly (0.10.0 is newer than 0.9.0), skip drafts, and verify the download against the release's `lurt.exe.sha256` before using it.
+- [ ] Download the new `lurt.exe` in the background with progress, then offer "Restart to update" (or update on the next launch). Swap the running exe safely: rename the old one, move the new one in, restart, and roll back if the new version fails to start.
+- [ ] Settings > About: current version, last checked time, "Check for updates", and a switch for automatic updates (on by default).
+- [ ] **What's new window.** After an update, the first launch shows a styled glass window with what changed in that version: New, Changed and Fixed sections taken from the release notes, with headlines and short descriptions. It shows once per version and never again until the next update (remember the last version shown in the profile). Also reachable from Settings > About ("What's new").
+- [ ] If several versions were skipped, the window lists each one's changes, newest first.
+- [ ] Needs the repo (or a separate public update feed) to be public: an app can't read private releases without a token, which must never be built into Lurt.
+
 ## Account
 
 - [ ] **Sync Lurt settings to the Google account.** Store settings (and later bookmarks) in the account's Google Drive app data folder, which only Lurt can see. Needs a Google Cloud project with an OAuth client ID for a desktop app (owner to create it), sign-in through the system browser with PKCE, the `drive.appdata` scope, and a "Sync now / last synced" row in Settings > Account. Until then, Settings > Account saves and loads settings as a file.
