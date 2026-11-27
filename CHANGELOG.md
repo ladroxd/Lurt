@@ -8,6 +8,22 @@ All notable changes to Lurt are listed here, newest first.
 ### Changed
 ### Fixed
 
+## [0.8.6] - 2026-11-27
+
+### Added
+
+- Drag tabs along the strip to reorder them. The order is kept between launches.
+
+### Changed
+
+- The start page's search box is now a real search box: you type in it, with suggestions under it, instead of being sent to the address bar.
+- The add favourite button is a smaller round button centered under the favourites, with a hover effect.
+- Favourites are centered on the start page, also when there are only a few.
+
+### Fixed
+
+- lurt.exe now carries its name, publisher, description and version (right-click > Properties > Details). Without them it looked anonymous to Windows and antivirus scanners. It is still unsigned.
+
 ## [0.8.5] - 2026-11-27
 
 ### Added

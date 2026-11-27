@@ -108,7 +108,7 @@ const H = {
     if (m.kind === 'top') { S.top = m.items; renderTiles(); }
     else if (S.panel === m.kind) renderList(m.kind, m.items);
   },
-  suggest(m) { if (m.q === addr.value.trim()) renderSugg(m.items); },
+  suggest(m) { if (m.q === box.value.trim()) renderSugg(m.items); },
   overlay(m) {
     if (!S.overlay) return;
     if (!m.snap) { send({ t: 'overlay', shown: true }); return; }
@@ -205,7 +205,8 @@ function renderTabs() {
       el.addEventListener('animationend', () => el.classList.remove('enter'), { once: true });
       tabEls.set(t.id, el);
     }
-    if (list.children[i] !== el) list.insertBefore(el, list.children[i] || null);
+    // While a tab is being dragged the strip keeps the order under the pointer.
+    if (list.children[i] !== el && (!tabDrag?.on || !el.parentNode)) list.insertBefore(el, list.children[i] || null);
     el.classList.toggle('active', t.id === S.active);
     el.classList.toggle('asleep', !!t.asleep);
     el.classList.toggle('private', !!t.private);
@@ -226,7 +227,51 @@ $('#tablist').addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   if (e.target.closest('.x')) return;
   if (id !== S.active) send({ t: 'activate', id });
+  tabDrag = { el, id, x: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, on: false };
 });
+// Drag a tab along the strip: it follows the pointer and the others slide out of its way.
+let tabDrag = null;
+addEventListener('mousemove', (e) => {
+  const d = tabDrag; if (!d) return;
+  if (!(e.buttons & 1) || !d.el.isConnected) { endTabDrag(); return; }
+  if (!d.on) {
+    if (Math.abs(e.clientX - d.x) < 5) return;
+    d.on = true;
+    d.el.classList.add('dragging');
+  }
+  const list = $('#tablist');
+  const box = list.getBoundingClientRect();
+  const w = d.el.offsetWidth;
+  const left = Math.max(box.left, Math.min(e.clientX - d.grab, box.right - w));
+  // Layout positions (offsetLeft) ignore the slide animations still running.
+  const mid = left - box.left + w / 2;
+  const others = [...list.children].filter((x) => x !== d.el);
+  const next = others.find((x) => mid < x.offsetLeft - list.offsetLeft + x.offsetWidth / 2) || null;
+  if (d.el.nextElementSibling !== next) {
+    const before = new Map(others.map((x) => [x, x.offsetLeft]));
+    list.insertBefore(d.el, next);
+    if (!S.settings?.reduce_motion) {
+      for (const [x, was] of before) {
+        const by = was - x.offsetLeft;
+        if (by) x.animate([{ transform: `translateX(${by}px)` }, { transform: 'none' }], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      }
+    }
+  }
+  d.el.style.transform = `translateX(${left - box.left - (d.el.offsetLeft - list.offsetLeft)}px)`;
+});
+function endTabDrag() {
+  const d = tabDrag; if (!d) return;
+  tabDrag = null;
+  if (!d.on) return;
+  d.el.classList.remove('dragging');
+  d.el.style.transform = '';
+  const ids = [...$('#tablist').children].map((x) => +x.dataset.id);
+  S.tabs.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+  renderTabs();
+  send({ t: 'tabOrder', ids });
+}
+addEventListener('mouseup', endTabDrag);
+addEventListener('blur', endTabDrag);
 $('#tablist').addEventListener('click', (e) => {
   const x = e.target.closest('.x'); if (!x) return;
   send({ t: 'close', id: +x.closest('.tab').dataset.id });
@@ -237,6 +282,9 @@ addEventListener('resize', () => requestAnimationFrame(() => {
 
 // ---- toolbar ---------------------------------------------------------------
 const addr = $('#addr');
+const startQ = $('#start-q');
+// The search box in use: the address bar or the start page's. Suggestions follow it.
+let box = addr;
 const omni = $('#omni');
 const snap = $('#snap');
 $('#newtab').innerHTML = icon('plus');
@@ -503,7 +551,6 @@ addEventListener('resize', () => S.overlay === 'shield-open' && placePop());
 $('#menu').onclick = () => togglePanel(S.panel || S.lastPanel);
 $('#gear').innerHTML = icon('gear');
 $('#gear').onclick = () => (settingsOpen() ? closeSettings() : openSettings());
-$('#start-search').onclick = () => addr.focus();
 for (const b of document.querySelectorAll('#win button')) b.onclick = () => send({ t: 'win', a: b.dataset.a });
 
 let toastT;
@@ -564,11 +611,11 @@ function closeOverlay(focusPage) {
   setTimeout(() => { if (!S.overlay) snap.removeAttribute('src'); }, 250);
 }
 function placeSugg() {
-  const r = omni.getBoundingClientRect();
+  const r = (box === startQ ? $('#start-search') : omni).getBoundingClientRect();
   Object.assign(sugg.style, { left: r.left + 'px', top: r.bottom + 6 + 'px', width: r.width + 'px' });
 }
 function renderSugg(items) {
-  const q = addr.value.trim();
+  const q = box.value.trim();
   if (!q) { S.rows = []; sugg.classList.remove('has'); return; }
   const engine = ENGINES[S.settings?.search] || 'your search engine';
   const first = looksLikeUrl(q)
@@ -584,13 +631,18 @@ function renderSugg(items) {
 }
 function pick(i, newTab) {
   const r = S.rows[i] || { kind: 'search' };
-  const input = addr.value.trim();
+  const input = box.value.trim();
   if (!input && r.kind !== 'url') return;
   if (r.kind === 'url') send({ t: 'open', url: r.url, newTab });
   else send({ t: 'go', input, newTab });
-  addr.blur();
+  box.blur();
 }
 let suggT;
+function boxFocus(input) {
+  box = input;
+  S.sel = 0; S.rows = []; sugg.classList.remove('has');
+  openOverlay();
+}
 addr.addEventListener('focus', () => {
   if (S.overlay === 'shield-open') closeShield();
   if (settingsOpen()) closeSettings();
@@ -598,8 +650,16 @@ addr.addEventListener('focus', () => {
   addr.value = t?.url || '';
   addr.select();
   omni.classList.add('focus');
-  S.sel = 0; S.rows = []; sugg.classList.remove('has');
-  openOverlay();
+  boxFocus(addr);
+});
+startQ.addEventListener('focus', () => {
+  if (S.overlay === 'shield-open') closeShield();
+  boxFocus(startQ);
+});
+startQ.addEventListener('blur', () => {
+  if (!document.hasFocus() && document.activeElement === startQ) return;
+  startQ.value = '';
+  if (S.overlay === 'omni-open') closeOverlay(false);
 });
 // First click selects the whole address (like other browsers); a drag on that first
 // click, and every click after it, selects text normally.
@@ -617,14 +677,15 @@ addr.addEventListener('blur', () => {
   if (S.overlay === 'omni-open') closeOverlay(false);
   renderBar();
 });
-addr.addEventListener('input', () => {
+function boxInput() {
+  openOverlay(); // reopen if something else closed it while the box kept focus
   S.sel = 0;
-  const q = addr.value.trim();
+  const q = box.value.trim();
   renderSugg(S.rows.length > 1 ? S.rows.slice(1).map((r) => ({ url: r.url, title: r.t })) : []);
   clearTimeout(suggT);
   if (q) suggT = setTimeout(() => send({ t: 'suggest', q }), 35);
-});
-addr.addEventListener('keydown', (e) => {
+}
+function boxKey(e) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     if (!S.rows.length) return;
     e.preventDefault();
@@ -635,12 +696,17 @@ addr.addEventListener('keydown', (e) => {
     pick(S.sel, e.altKey);
   } else if (e.key === 'Escape') {
     e.preventDefault();
-    const t = cur();
-    if (addr.value !== (t?.url || '') && addr.value) { addr.value = t?.url || ''; addr.select(); renderSugg([]); return; }
+    // First Escape undoes what you typed, the next one leaves the box.
+    const was = box === addr ? cur()?.url || '' : '';
+    if (box.value !== was && box.value) { box.value = was; box.select(); renderSugg([]); return; }
     S.overlay && closeOverlay(true);
-    addr.blur();
+    box.blur();
   }
-});
+}
+for (const input of [addr, startQ]) {
+  input.addEventListener('input', boxInput);
+  input.addEventListener('keydown', boxKey);
+}
 sugg.addEventListener('mousedown', (e) => e.preventDefault());
 sugg.addEventListener('click', (e) => {
   const r = e.target.closest('.row'); if (r) pick(+r.dataset.i, e.ctrlKey);
@@ -651,6 +717,11 @@ addEventListener('resize', () => S.overlay && placeSugg());
 function renderStart() {
   const t = cur();
   const blank = !t || !t.url;
+  // What you typed on the start page belongs to the tab you typed it in.
+  if (startQ._tab !== S.active || !blank) {
+    startQ._tab = S.active; startQ.value = '';
+    if (document.activeElement === startQ) startQ.blur();
+  }
   document.body.classList.toggle('blank', blank);
   document.body.classList.toggle('private', !!(t && t.private));
   if (blank && !S.blank) send({ t: 'list', kind: 'top' });
@@ -706,10 +777,11 @@ function renderTiles() {
     const host = hostOf(i.url);
     return `<button class="tile${i.pinned ? ' pinned' : ''}" data-i="${n}" data-url="${esc(i.url)}" title="${esc(i.title || i.url)}"><span class="ic glass">` +
       `${iconImg(host, letter(i.url, i.title))}</span><span>${esc(tileName(i))}</span></button>`;
-  }).join('') + `<button class="tile add" data-add title="Add a favourite"><span class="ic glass">${icon('plus')}</span><span>Add</span></button>`;
+  }).join('');
 }
+$('#tile-add').innerHTML = icon('plus');
+$('#tile-add').onclick = () => editTile(null);
 $('#tiles').addEventListener('click', (e) => {
-  if (e.target.closest('[data-add]')) { editTile(null); return; }
   const b = e.target.closest('.tile[data-url]'); if (b) send({ t: 'open', url: b.dataset.url, newTab: e.ctrlKey });
 });
 $('#tiles').addEventListener('auxclick', (e) => {
@@ -1467,7 +1539,7 @@ function openSettings(sec) {
   if (sec) S.setSec = sec;
   hideMenu();
   if (S.overlay === 'shield-open') closeShield(false);
-  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'omni-open') box.blur();
   if (!settingsOpen()) openOverlay('settings-open');
   renderSetNav();
   renderSettings(true);
@@ -1941,9 +2013,9 @@ addEventListener('keydown', (e) => {
   if (c === 'alt+arrowleft') { e.preventDefault(); send({ t: 'nav', a: 'back' }); return; }
   if (c === 'alt+arrowright') { e.preventDefault(); send({ t: 'nav', a: 'forward' }); return; }
   if (c === 'escape' && S.panel && document.activeElement !== addr) { closePanel(); return; }
-  // Typing anywhere on the start page goes to the address bar.
+  // Typing anywhere on the start page goes to its search box.
   const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
-  if (S.blank && !typing && !e.ctrlKey && !e.altKey && e.key.length === 1) addr.focus();
+  if (S.blank && !typing && !e.ctrlKey && !e.altKey && e.key.length === 1) startQ.focus();
 });
 addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 
@@ -2064,7 +2136,7 @@ function placeAcct() {
 }
 function openAcct() {
   if (settingsOpen()) return;
-  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'omni-open') box.blur();
   if (S.overlay === 'bm-open') closeBmMenus();
   if (S.overlay) closeOverlay(false);
   renderAcctPop(); placeAcct();
@@ -2234,7 +2306,7 @@ function placeDl() {
 }
 function openDl() {
   if (settingsOpen()) return;
-  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'omni-open') box.blur();
   if (S.overlay === 'bm-open') closeBmMenus();
   if (S.overlay) closeOverlay(false);
   renderDlPop(); placeDl();
@@ -2371,7 +2443,7 @@ function placeStar() {
 }
 function openStar() {
   const t = cur(); if (!t || !t.url || settingsOpen()) return;
-  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'omni-open') box.blur();
   if (S.overlay === 'bm-open') closeBmMenus();
   if (S.overlay) closeOverlay(false);
   const mark = findMark(t.url);

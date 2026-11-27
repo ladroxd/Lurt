@@ -1475,6 +1475,13 @@ impl App {
             }
             "close" => self.close_tab(id),
             "activate" => self.activate(id),
+            "tabOrder" => {
+                let ids: Vec<u64> = m["ids"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                // Tabs the UI didn't list (opened while dragging) go to the end.
+                self.tabs.sort_by_key(|t| ids.iter().position(|&i| i == u64::from(t.id)).unwrap_or(ids.len()));
+                self.push_state();
+                self.save_session();
+            }
             "go" => {
                 let url = util::resolve_input(&s("input"), &self.settings.search);
                 if m["newTab"].as_bool() == Some(true) {

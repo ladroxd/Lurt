@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="87" height="22" viewBox="0 0 87 22" role="img" aria-label="size: ~6 MB">
+<clipPath id="r"><rect width="87" height="22" rx="6"/></clipPath>
+<g clip-path="url(#r)"><rect width="38" height="22" fill="#24262d"/><rect x="38" width="49" height="22" fill="#3ddc84"/></g>
+<rect x=".5" y=".5" width="86" height="21" rx="5.5" fill="none" stroke="#ffffff" stroke-opacity=".12"/>
+<g font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="11" font-weight="600" text-anchor="middle"><text x="19.0" y="15" fill="#c9ccd4">size</text><text x="62.5" y="15" fill="#0d0f14">~6 MB</text></g>
+</svg>

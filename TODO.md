@@ -7,10 +7,13 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 - [x] Push `main` up to the Google account button (4442139).
 - [x] Push the skeleton, Delete all browser data, Chrome import, branded loading screen, Fewer processes and Privacy page commits.
 - [x] Push the downloads button, Downloads page and the built-in extensions plan (d214c6a).
-- [ ] Push `main`: the release workflow sees no release for 0.8.5 yet, builds `lurt.exe` and opens a **draft** release with the notes from `.github/release-notes/v0.8.5.md`.
-- [ ] Review the draft release on GitHub and publish it (publishing creates the `v0.8.5` tag, and the README button then downloads it).
-- [ ] The repo is private: the README download button and releases only work for people with access. Make it public when Lurt should be downloadable by anyone.
-- [ ] For each new version: bump `version` in `Cargo.toml`, add `.github/release-notes/vX.Y.Z.md` (from `TEMPLATE.md`), update the version badge in `README.md`, push `main`.
+- [ ] For each new version: bump `version` in `Cargo.toml`, add `.github/release-notes/vX.Y.Z.md` (from `TEMPLATE.md`), update the version in `assets/readme/version.svg` and `assets/readme/download.svg`, push `main`.
+
+## Trust and antivirus
+
+- [ ] Find out which antivirus flags `lurt.exe` and the detection name, then report it to that vendor as a false positive (Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission). Repeat for new releases while unsigned.
+- [ ] Add an open source license (needed for free signing).
+- [ ] Code-sign releases: apply to SignPath Foundation (free for open source, https://signpath.org/apply) and sign in the release workflow, or buy a certificate.
 
 ## Updates
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="64" viewBox="0 0 300 64" role="img" aria-label="Download Lurt for Windows">
+<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b8cff"/><stop offset="1" stop-color="#0063d1"/></linearGradient>
+<linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+<rect width="300" height="64" rx="16" fill="url(#g)"/><rect width="300" height="64" rx="16" fill="url(#s)"/>
+<rect x=".75" y=".75" width="298.5" height="62.5" rx="15.25" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="1.5"/>
+<g transform="translate(26 20)" fill="#fff"><rect width="11" height="11" rx="1.5"/><rect x="13" width="11" height="11" rx="1.5"/><rect y="13" width="11" height="11" rx="1.5"/><rect x="13" y="13" width="11" height="11" rx="1.5"/></g>
+<g font-family="Segoe UI,Helvetica,Arial,sans-serif" fill="#fff"><text x="66" y="30" font-size="17" font-weight="700">Download for Windows</text><text x="66" y="48" font-size="12" fill-opacity=".8">Lurt 0.8.6 · lurt.exe · about 6 MB</text></g>
+</svg>

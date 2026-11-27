@@ -78,7 +78,7 @@ pub struct Shape {
 
 impl Default for Shape {
     fn default() -> Self {
-        Self { tiles: vec![22.0], bm: Vec::new(), time_w: 259.0, date_w: 148.0 }
+        Self { tiles: Vec::new(), bm: Vec::new(), time_w: 259.0, date_w: 148.0 }
     }
 }
 
@@ -447,13 +447,14 @@ fn paint(w: i32, h: i32, look: &Look) -> (Vec<u32>, Vec<u8>) {
     if look.blank {
         // Start page: a centered column (30px apart, 6vh padding at the bottom) of the
         // clock, the search pill and the tile grid.
-        let tiles = if look.shape.tiles.is_empty() { vec![22.0] } else { look.shape.tiles.clone() };
+        let tiles = &look.shape.tiles;
         let grid_w = 660.0_f32.min(vw * 0.92);
         let cols = (((grid_w + 12.0) / 104.0).floor() as usize).max(1);
         let rows = tiles.len().div_ceil(cols);
         let tiles_h = rows as f32 * 95.0 + rows.saturating_sub(1) as f32 * 10.0;
         let clock_h = if look.show_clock { 96.0 + 30.0 } else { 0.0 };
-        let total = clock_h + 50.0 + 30.0 + tiles_h;
+        // Then the round add button, 26px under the grid (the 30px gap, pulled up 4px).
+        let total = clock_h + 50.0 + 30.0 + tiles_h + 26.0 + 38.0;
         let mut y = vy + ((vh - 0.06 * ch) - total) / 2.0;
         if look.show_clock {
             let tw = look.shape.time_w;
@@ -467,21 +468,18 @@ fn paint(w: i32, h: i32, look: &Look) -> (Vec<u32>, Vec<u8>) {
         rect(px0, y, pw, 50.0, 25.0, glass, glass_a, true);
         rect(px0 + 22.0, y + 17.0, 16.0, 16.0, 8.0, bone, bone_a, true);
         rect(px0 + 52.0, y + 20.0, 156.0_f32.min(pw * 0.4), 11.0, 5.5, bone, bone_a, true);
-        rect(px0 + pw - 51.0, y + 14.0, 41.0, 21.0, 6.0, bone, bone_a, true);
         y += 50.0 + 30.0;
-        // Tile grid: 92px columns, 12px apart, centered; rows 95px tall, 10px apart.
-        let row_w = cols as f32 * 92.0 + (cols as f32 - 1.0) * 12.0;
-        let gx = mx - row_w / 2.0;
+        // Tiles: 92px wide, 12px apart, each row centered; rows 95px tall, 10px apart.
         for (i, &lw) in tiles.iter().enumerate() {
+            let in_row = (tiles.len() - i / cols * cols).min(cols);
+            let gx = mx - (in_row as f32 * 104.0 - 12.0) / 2.0;
             let (tx, ty) = (gx + (i % cols) as f32 * 104.0, y + (i / cols) as f32 * 105.0);
-            let add = i == tiles.len() - 1;
-            rect(tx + 19.0, ty + 8.0, 54.0, 54.0, r * 1.05, glass, if add { glass_a * 0.4 } else { glass_a }, true);
-            if !add {
-                rect(tx + 34.0, ty + 23.0, 24.0, 24.0, 6.0, bone, bone_a, true);
-            }
+            rect(tx + 19.0, ty + 8.0, 54.0, 54.0, r * 1.05, glass, glass_a, true);
+            rect(tx + 34.0, ty + 23.0, 24.0, 24.0, 6.0, bone, bone_a, true);
             let lw = lw.clamp(16.0, 88.0);
             rect(tx + 46.0 - lw / 2.0, ty + 72.0, lw, 10.0, 5.0, bone, bone_a, true);
         }
+        rect(mx - 19.0, y + tiles_h + 26.0, 38.0, 38.0, 19.0, glass, glass_a, true);
     } else {
         // A generic page: header bar, title, paragraphs.
         let px = vx + vw * 0.08;
@@ -510,7 +508,7 @@ mod tests {
         let dir = std::env::var("LURT_SPLASH_OUT").unwrap_or_else(|_| ".".into());
         for (name, dark, blank) in [("dark-start", true, true), ("light-page", false, false)] {
             let (w, h) = (1480, 929);
-            let look = Look { dark, tint: 0.6, radius: 11.0, compact: false, blank, scale: 1.0, tabs: 1, show_clock: true, bm_bar: true, shape: Shape { tiles: vec![34.0, 31.0, 46.0, 75.0, 51.0, 75.0, 56.0, 71.0, 22.0], bm: vec![168.0], ..Shape::default() } };
+            let look = Look { dark, tint: 0.6, radius: 11.0, compact: false, blank, scale: 1.0, tabs: 1, show_clock: true, bm_bar: true, shape: Shape { tiles: vec![34.0, 31.0, 46.0, 75.0, 51.0, 75.0, 56.0, 71.0], bm: vec![168.0], ..Shape::default() } };
             let (px, _) = paint(w, h, &look);
             // Composite over a mid-tone "desktop" so transparency is visible.
             let bg = if dark { 70u32 } else { 160u32 };

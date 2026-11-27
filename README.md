@@ -3,15 +3,13 @@
 <h1 align="center">Lurt</h1>
 
 <p align="center">
-  <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe">
-    <img src="https://img.shields.io/badge/Download%20for%20Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white" height="42" alt="Download Lurt for Windows">
-  </a>
+  <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe"><img src="assets/readme/download.svg" width="300" alt="Download Lurt for Windows"></a>
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.8.5-8ab4ff?style=flat-square" alt="Version 0.8.5">
-  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square" alt="Windows 10 and 11">
-  <img src="https://img.shields.io/badge/size-~6%20MB-3ddc84?style=flat-square" alt="About 6 MB">
-  <img src="https://img.shields.io/badge/made%20with-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Made with Rust">
+  <img src="assets/readme/version.svg" alt="Version 0.8.6">
+  <img src="assets/readme/windows.svg" alt="Windows 10 and 11">
+  <img src="assets/readme/size.svg" alt="About 6 MB">
+  <img src="assets/readme/rust.svg" alt="Made with Rust">
 </p>
 <p align="center"><sub>No installer: download <code>lurt.exe</code> and run it. <a href="https://github.com/ladroxd/Lurt/releases">All releases</a></sub></p>
 
