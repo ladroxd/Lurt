@@ -8,7 +8,7 @@ All notable changes to Lurt are listed here, newest first.
 ### Changed
 ### Fixed
 
-## [0.1.0] - 2026-11-27
+## [0.8.5] - 2026-11-27
 
 ### Added
 
@@ -71,5 +71,5 @@ All notable changes to Lurt are listed here, newest first.
 - UI and per-site CSS/JS mods.
 - Google as the default search engine.
 
-[Unreleased]: https://github.com/ladroxd/Lurt/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ladroxd/Lurt/releases/tag/v0.1.0
+[Unreleased]: https://github.com/ladroxd/Lurt/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/ladroxd/Lurt/releases/tag/v0.8.5

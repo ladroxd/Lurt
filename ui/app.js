@@ -1,4 +1,6 @@
 'use strict';
+// Filled in from Cargo.toml when Lurt is built.
+const VERSION = '__LURT_VERSION__';
 // Lurt browser UI. Talks to Rust with ipc.postMessage(JSON) and receives lurt.on(msg).
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -1787,7 +1789,7 @@ function field(it, s) {
         `<div class="btns"><button class="btn" data-act="exportSettings">${icon('download')}Save settings to a file</button>` +
         `<label class="btn">${icon('upload')}Load settings from a file<input type="file" id="settings-file" accept=".json" hidden></label></div>`;
     case 'about':
-      return `<div class="about"><span class="logo">${LOGO}</span><div><b>Lurt 0.1.0</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
+      return `<div class="about"><span class="logo">${LOGO}</span><div><b>Lurt ${VERSION}</b><small>A light, fast glass browser written in Rust, running on Microsoft Edge WebView2.</small></div></div>` +
         `<div class="btns"><button class="btn" data-open="https://github.com/ladroxd/Lurt">${icon('external')}Project page</button><button class="btn" data-open="https://github.com/ladroxd/Lurt/releases">${icon('download')}Releases</button></div>`;
     case 'keys':
       return `<div class="keys">` + KEYS.map(([a, k]) => `<span>${esc(a)}</span><kbd>${esc(k)}</kbd>`).join('') + `</div>`;

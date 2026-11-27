@@ -235,7 +235,7 @@ fn main() {
 
     tabs::write_engine_prefs(&Store::webview_dir(), &settings);
     let mut ctx = WebContext::new(Some(Store::webview_dir()));
-    let page = UI_HTML.replace("/*CSS*/", UI_CSS).replace("/*JS*/", UI_JS);
+    let page = UI_HTML.replace("/*CSS*/", UI_CSS).replace("/*JS*/", UI_JS).replace("__LURT_VERSION__", env!("CARGO_PKG_VERSION"));
     let p = proxy.clone();
     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
     let args = tabs::ENGINE_ARGS.get_or_init(|| tabs::engine_args(&settings)).clone();

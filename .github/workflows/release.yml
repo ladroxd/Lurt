@@ -2,7 +2,8 @@
 #
 # - Push to main: if the version in Cargo.toml has no release yet (published or draft),
 #   a draft release for it is built. Bump the version in Cargo.toml to get a new one.
-# - Push a tag like v0.2.0: builds a draft for that tag (it must match Cargo.toml).
+# - Push a tag like v0.9.0: the same, for that tag (it must match Cargo.toml).
+# Either way a version gets one release: delete the draft to have it built again.
 # - Actions tab > Release > Run workflow: same as a push to main.
 #
 # The text comes from .github/release-notes/v<version>.md (copy TEMPLATE.md), or from that
@@ -38,14 +39,12 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            if [[ "$GITHUB_REF_NAME" != "$tag" ]]; then
-              echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
-              exit 1
-            fi
-            echo "needed=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+            exit 1
           fi
+          # One release per version: pushing main and the tag together builds it once
+          # (runs are queued, so the second one finds the first one's draft).
           # Drafts are included when listing with this token.
           if gh api "repos/$GITHUB_REPOSITORY/releases" --paginate -q '.[].tag_name' | grep -qx "$tag"; then
             echo "Release $tag already exists (published or draft): nothing to do."

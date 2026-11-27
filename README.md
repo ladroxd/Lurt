@@ -8,7 +8,7 @@
   </a>
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.0-8ab4ff?style=flat-square" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.8.5-8ab4ff?style=flat-square" alt="Version 0.8.5">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/size-~6%20MB-3ddc84?style=flat-square" alt="About 6 MB">
   <img src="https://img.shields.io/badge/made%20with-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Made with Rust">
