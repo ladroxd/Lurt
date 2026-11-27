@@ -118,7 +118,7 @@ const H = {
     snap.src = m.snap;
   },
   focus() { addr.focus(); addr.select(); },
-  panel(m) { if (m.p === 'settings') openSettings(); else togglePanel(m.p); },
+  panel(m) { if (m.p === 'settings') openSettings(); else if (m.p === 'downloads') openDownloadsPage(); else togglePanel(m.p); },
   mods(m) { $('#mods-css').textContent = m.css || ''; },
   toast(m) { toast(m.text); },
   sources(m) {
@@ -1310,6 +1310,10 @@ function runAction(btn) {
 // A centered window over a blurred view of the browser, with a section list on the left.
 const ACCENTS = ['#8ab4ff', '#a78bfa', '#f472b6', '#fb7185', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#e2e8f0'];
 const PERM = [['ask', 'Ask'], ['block', 'Block']];
+const DL_ACTIONS = [['allow', 'Allow'], ['ask', 'Ask where to save'], ['open', 'Open when finished'], ['block', 'Block']];
+const DL_HINT = { allow: 'Downloads normally', ask: 'Asks where to save it', open: 'Opens the file when it finishes', block: 'Never downloaded' };
+const DL_SUGG = ['exe', 'msi', 'zip', 'rar', '7z', 'pdf', 'apk', 'iso', 'torrent', 'mp3', 'mp4', 'jpg', 'png', 'docx', 'xlsx', 'bat', 'cmd', 'ps1', 'js', 'vbs', 'scr', 'jar', 'dmg'];
+const DL_PROGRAMS = ['exe', 'msi', 'bat', 'cmd', 'scr', 'ps1', 'vbs', 'jar', 'com', 'pif', 'hta'];
 // Filter lists: [id, name, what it does].
 const LISTS = [
   ['easylist', 'EasyList', 'Ads'],
@@ -1416,6 +1420,13 @@ const SECTIONS = [
       { type: 'buttons', items: [['clearHistory', 'trash', 'Clear history', true], ['clearData', 'trash', 'Clear cookies & cache', true]] },
       { type: 'wipe', label: 'Delete all browser data', kw: 'clear reset erase wipe everything passwords bookmarks history' },
     ]],
+  ] },
+  { id: 'downloads', icon: 'download', title: 'Downloads', groups: [
+    ['Where downloads go', [
+      { type: 'dlDir', label: 'Download folder', kw: 'location path save folder directory' },
+      { k: 'download_ask', label: 'Ask where to save each file', desc: 'Shows a Save as window for every download', type: 'toggle', kw: 'save as location' },
+    ]],
+    ['File types', [{ type: 'dlRules', label: 'File type rules', kw: 'extension block allow exe zip pdf open automatically type' }]],
   ] },
   { id: 'data', icon: 'database', title: 'Your data', groups: [
     ['Import from browsers on this PC', [{ type: 'importPC' }]],
@@ -1541,6 +1552,7 @@ function renderSearch() {
   $('#set-body').scrollTop = 0;
 }
 function goToSetting(r) {
+  if (r.sec.id === 'downloads') S.dlTab = 'settings';
   $('#set-q').value = '';
   document.body.classList.remove('set-searching');
   openSettings(r.sec.id);
@@ -1582,7 +1594,7 @@ function renderSettings(top) {
     $('#set-h').textContent = sec.title;
     const body = $('#set-body');
     const y = top ? 0 : body.scrollTop;
-    let html = groupsHtml(sec.groups, s);
+    let html = sec.id === 'downloads' ? downloadsPage(sec, s) : groupsHtml(sec.groups, s);
     if (sec.id === 'data') {
       if (S.importing) html = `<div class="status"><i class="spin"></i>Importing from ${esc(S.importing)}…</div>` + html;
       else if (S.importMsg) html = `<div class="status">${icon('info')}${esc(S.importMsg)}</div>` + html;
@@ -1619,7 +1631,7 @@ function renderTrackers() {
   body.innerHTML = h; body.scrollTop = y;
 }
 const KEYS = [['New tab', 'Ctrl T'], ['New private tab', 'Ctrl Shift N'], ['Close tab', 'Ctrl W'], ['Reopen closed tab', 'Ctrl Shift T'], ['Address bar', 'Ctrl L'],
-  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
+  ['Next tab', 'Ctrl Tab'], ['Bookmark page', 'Ctrl D'], ['History', 'Ctrl H'], ['Bookmarks bar', 'Ctrl Shift B'], ['All bookmarks', 'Ctrl Shift O'], ['Downloads', 'Ctrl J'], ['Settings', 'Ctrl ,'], ['Reload', 'F5']];
 function field(it, s) {
   const label = `<div class="lbl"><b>${esc(it.label)}</b>${it.desc ? `<small>${esc(val(it.desc))}</small>` : ''}</div>`;
   switch (it.type) {
@@ -1639,6 +1651,23 @@ function field(it, s) {
     case 'select':
       return `<div class="set">${label}<select class="field" style="width:auto;min-width:150px" data-k="${it.k}" ${it.num ? 'data-num' : ''}>` +
         it.opts.map(([v, l]) => `<option value="${v}" ${String(s[it.k]) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('') + '</select></div>';
+    case 'dlDir': {
+      const custom = !!s.download_dir;
+      return `<div class="set">${`<div class="lbl"><b>${esc(it.label)}</b><small class="path">${esc(S.dlDir || s.download_dir || 'Downloads')}</small></div>`}` +
+        `<div class="row-btns">${custom ? '<button class="btn" data-dir-reset>Use Downloads</button>' : ''}<button class="btn" data-act="dlPickDir">${icon('folder')}Change…</button></div></div>`;
+    }
+    case 'dlRules': {
+      const rules = s.download_rules || [];
+      const opts = (v) => DL_ACTIONS.map(([a, l]) => `<option value="${a}" ${a === v ? 'selected' : ''}>${l}</option>`).join('');
+      return `<div class="rules">` +
+        (rules.length ? rules.map((r, i) => `<div class="set rule"><span class="ext">.${esc(r.ext)}</span><div class="lbl"><small>${esc(DL_HINT[r.action] || '')}</small></div>` +
+          `<select class="field" data-rule="${i}">${opts(r.action)}</select><button class="icon sm" data-rule-del="${i}" title="Remove">${icon('x')}</button></div>`).join('')
+          : '<div class="set"><div class="lbl"><small>No rules yet: every file type downloads normally.</small></div></div>') +
+        `<div class="set rule add"><input class="field" id="rule-ext" placeholder="File type, like exe or zip" list="rule-sugg" spellcheck="false">` +
+        `<select class="field" id="rule-act">${opts('block')}</select><button class="btn" data-rule-add>Add</button></div>` +
+        `<datalist id="rule-sugg">${DL_SUGG.map((x) => `<option value="${x}">`).join('')}</datalist>` +
+        `<div class="btns"><button class="btn" data-rule-preset="programs">${icon('shield')}Block programs and scripts</button></div></div>`;
+    }
     case 'privLevel': {
       const cur = privLevel(s);
       const card = (id, title, desc) => `<button class="lvl ${cur === id ? 'on' : ''}" data-level="${id}"><b>${title}</b><small>${desc}</small></button>`;
@@ -1786,6 +1815,12 @@ function bindSettings(el, active, ownActions) {
       return;
     }
     if (e.target.dataset.a === 'site') { send({ t: 'shield' }); return; }
+    if (e.target.dataset.rule !== undefined && e.target.tagName === 'SELECT') {
+      const rules = structuredClone(S.settings.download_rules || []);
+      rules[+e.target.dataset.rule].action = e.target.value;
+      setSetting('download_rules', rules, { rerender: true });
+      return;
+    }
     if (e.target.dataset.list) {
       const id = e.target.dataset.list;
       const cur = (S.settings.filter_lists || []).filter((x) => x !== id);
@@ -1834,6 +1869,16 @@ function bindSettings(el, active, ownActions) {
       setSetting(seg.dataset.k, segBtn.dataset.v, { rerender: seg.dataset.k === 'backdrop' });
       return;
     }
+    const tab = q('[data-dltab]');
+    if (tab) { S.dlTab = tab.dataset.dltab; renderSettings(true); return; }
+    if (q('[data-dir-reset]')) { setSetting('download_dir', '', { rerender: true }); send({ t: 'downloads' }); return; }
+    const rdel = q('[data-rule-del]');
+    if (rdel) { setSetting('download_rules', S.settings.download_rules.filter((_, i) => i !== +rdel.dataset.ruleDel), { rerender: true }); return; }
+    if (q('[data-rule-add]')) { addRule($('#rule-ext').value, $('#rule-act').value); return; }
+    const pre = q('[data-rule-preset]');
+    if (pre) { for (const x of DL_PROGRAMS) addRule(x, 'block', true); renderSettings(); return; }
+    const dla = q('[data-dlp]');
+    if (dla) { dlPageAction(dla); return; }
     const lvl = q('[data-level]');
     if (lvl) {
       const v = LEVELS[lvl.dataset.level];
@@ -1869,7 +1914,7 @@ bindSettings($('#set-body'), settingsOpen, true);
 bindSettings($('#side-body'), () => S.panel === 'trackers', false);
 
 // ---- keyboard --------------------------------------------------------------
-const FORWARD = new Set(['ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+shift+t', 'ctrl+shift+n',
+const FORWARD = new Set(['ctrl+j', 'ctrl+t', 'ctrl+w', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+shift+t', 'ctrl+shift+n',
   'ctrl+1', 'ctrl+2', 'ctrl+3', 'ctrl+4', 'ctrl+5', 'ctrl+6', 'ctrl+7', 'ctrl+8', 'ctrl+9']);
 addEventListener('keydown', (e) => {
   let k = e.key.toLowerCase(); if (k === ',') k = 'comma';
@@ -2106,7 +2151,7 @@ function dlStatus(d) {
     default: return d.reason || 'Failed';
   }
 }
-function dlRow(d) {
+function dlRow(d, big) {
   const ext = (d.name.match(/\.([a-z0-9]{1,5})$/i) || [, ''])[1].toUpperCase() || 'FILE';
   const pct = d.total > 0 ? Math.min(100, (d.recv / d.total) * 100) : 0;
   const b = (a, ic, title) => `<button class="icon sm" data-dl="${a}" title="${title}">${icon(ic)}</button>`;
@@ -2117,7 +2162,7 @@ function dlRow(d) {
       : b('Retry', 'refresh', 'Try again') + b('Remove', 'x', 'Remove from list');
   return `<div class="dl-row ${d.state}${d.gone ? ' gone' : ''}" data-id="${d.id}" title="${esc(d.path)}">` +
     `<span class="dl-ic">${esc(ext)}</span>` +
-    `<div class="dl-txt"><b>${esc(d.name)}</b><small>${esc(dlStatus(d))}</small>` +
+    `<div class="dl-txt"><b>${esc(d.name)}</b>` + (big && d.url ? `<a class="dl-src" title="${esc(d.url)}">${esc(d.url.length > 90 ? d.url.slice(0, 90) + '…' : d.url)}</a>` : '') + `<small>${esc(dlStatus(d))}</small>` +
     (active(d) ? `<i class="bar ${d.total > 0 ? '' : 'indef'}"><i style="width:${pct}%"></i></i>` : '') + '</div>' +
     `<div class="dl-acts">${acts}</div></div>`;
 }
@@ -2135,9 +2180,10 @@ function renderDlPop() {
   const head = `<div class="dl-head"><b>Downloads</b><span>` +
     (finished ? `<button class="link" data-dlall="clear">Clear list</button>` : '') +
     `<button class="icon sm" data-dlall="folder" title="Open Downloads folder">${icon('folder')}</button></span></div>`;
-  const body = S.dl.length ? `<div class="dl-list">${S.dl.map(dlRow).join('')}</div>`
+  const body = S.dl.length ? `<div class="dl-list">${S.dl.map((d) => dlRow(d)).join('')}</div>`
     : `<div class="dl-empty">${icon('download')}<span>Files you download appear here</span></div>`;
-  dlPop.innerHTML = head + body;
+  const foot = `<button class="dl-all" data-dlall="page">${icon('download')}Show all downloads<span>Ctrl+J</span></button>`;
+  dlPop.innerHTML = head + body + foot;
 }
 // Update rows in place while the panel is open, so buttons stay clickable during progress.
 function patchDlPop() {
@@ -2165,8 +2211,10 @@ H.downloads = (m) => {
     }
   }
   S.dl = m.list;
+  if (m.dir) S.dlDir = m.dir;
   renderDlBtn();
   if (S.overlay === 'dl-open') patchDlPop();
+  if (dlPageOpen()) patchDlPage();
 };
 function dlPulse(cls) { dlBtn.classList.remove('pulse', 'done-pulse'); void dlBtn.offsetWidth; dlBtn.classList.add(cls); }
 H.dlStart = () => dlPulse('pulse');
@@ -2190,7 +2238,10 @@ function closeDl(focusPage) { if (S.overlay === 'dl-open') closeOverlay(focusPag
 dlBtn.onclick = () => (S.overlay === 'dl-open' ? closeDl(true) : openDl());
 dlPop.addEventListener('click', (e) => {
   const all = e.target.closest('[data-dlall]');
-  if (all) { send({ t: all.dataset.dlall === 'clear' ? 'dlClear' : 'dlFolder' }); if (all.dataset.dlall === 'folder') closeDl(false); return; }
+  if (all) {
+    if (all.dataset.dlall === 'page') { openDownloadsPage(); return; }
+    send({ t: all.dataset.dlall === 'clear' ? 'dlClear' : 'dlFolder' }); if (all.dataset.dlall === 'folder') closeDl(false); return;
+  }
   const row = e.target.closest('.dl-row'); if (!row) return;
   const id = +row.dataset.id;
   const b = e.target.closest('[data-dl]');
@@ -2203,3 +2254,83 @@ addEventListener('mousedown', (e) => {
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'dl-open') { e.preventDefault(); closeDl(true); } });
 addEventListener('resize', () => S.overlay === 'dl-open' && placeDl());
 send({ t: 'downloads' });
+
+// ---- downloads page (Settings > Downloads), like chrome://downloads ----------------------
+S.dlTab = 'all'; S.dlQ = '';
+function addRule(ext, action, quiet) {
+  ext = String(ext || '').trim().toLowerCase().replace(/^\*?\./, '');
+  if (!/^[a-z0-9]{1,12}$/.test(ext)) { if (!quiet) toast('Type a file type like exe or zip'); return; }
+  const rules = (S.settings.download_rules || []).filter((r) => r.ext !== ext);
+  rules.push({ ext, action });
+  setSetting('download_rules', rules, { rerender: !quiet });
+}
+function openDownloadsPage() { S.dlTab = 'all'; closeDl(false); openSettings('downloads'); }
+function dayLabel(sec) {
+  const d = new Date(sec * 1000), t = new Date(); t.setHours(0, 0, 0, 0);
+  const days = Math.round((t - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: d.getFullYear() === t.getFullYear() ? undefined : 'numeric' });
+}
+function dlShown() {
+  const q = S.dlQ.trim().toLowerCase();
+  return q ? S.dl.filter((d) => (d.name + ' ' + d.url).toLowerCase().includes(q)) : S.dl;
+}
+function dlPageList() {
+  const list = dlShown();
+  if (!S.dl.length) return `<div class="dl-empty big">${icon('download')}<span>Files you download appear here</span></div>`;
+  if (!list.length) return `<div class="dl-empty big">${icon('search')}<span>No downloads match “${esc(S.dlQ)}”</span></div>`;
+  let html = '', day = '';
+  for (const d of list) {
+    const l = dayLabel(d.at || 0);
+    if (l !== day) { day = l; html += `<h4 class="dl-day">${esc(l)}</h4>`; }
+    html += dlRow(d, true);
+  }
+  return html;
+}
+function downloadsPage(sec, s) {
+  const tabs = `<div class="dlp-tabs"><button data-dltab="all" class="${S.dlTab === 'all' ? 'on' : ''}">${icon('download')}All downloads</button>` +
+    `<button data-dltab="settings" class="${S.dlTab === 'settings' ? 'on' : ''}">${icon('gear')}Download settings</button></div>`;
+  if (S.dlTab === 'settings') return tabs + groupsHtml(sec.groups, s);
+  const n = S.dl.length, act = S.dl.filter(active).length;
+  return tabs + `<div class="dlp-bar"><label class="dlp-search">${icon('search')}<input id="dlp-q" placeholder="Search downloads" value="${esc(S.dlQ)}" spellcheck="false" autocomplete="off"></label>` +
+    `<span class="dlp-count">${n} file${n === 1 ? '' : 's'}${act ? ` · ${act} downloading` : ''}</span>` +
+    `<button class="btn" data-dlp="folder">${icon('folder')}Open folder</button>` +
+    (S.dl.some((d) => !active(d)) ? `<button class="btn" data-dlp="clear">${icon('trash')}Clear list</button>` : '') + '</div>' +
+    `<div id="dlp-list" class="dl-list page">${dlPageList()}</div>`;
+}
+function dlPageOpen() { return settingsOpen() && S.setSec === 'downloads' && S.dlTab === 'all' && !$('#set-q').value.trim(); }
+function dlPageAction(b) {
+  const a = b.dataset.dlp;
+  if (a === 'folder') { send({ t: 'dlFolder' }); return; }
+  if (a === 'clear') { send({ t: 'dlClear' }); return; }
+}
+// Live updates without re-rendering rows, so clicks during progress aren't lost.
+function patchDlPage() {
+  const box = $('#dlp-list'); if (!box) return;
+  const list = dlShown();
+  const rows = [...box.querySelectorAll('.dl-row')];
+  const same = rows.length === list.length && rows.every((r, i) => +r.dataset.id === list[i].id && r.classList.contains(list[i].state));
+  if (!same) { box.innerHTML = dlPageList(); return; }
+  list.forEach((d, i) => {
+    rows[i].querySelector('small').textContent = dlStatus(d);
+    const bar = rows[i].querySelector('.bar > i');
+    if (bar && d.total > 0) bar.style.width = Math.min(100, (d.recv / d.total) * 100) + '%';
+  });
+  const c = $('#set-body .dlp-count');
+  if (c) { const act = S.dl.filter(active).length; c.textContent = `${S.dl.length} file${S.dl.length === 1 ? '' : 's'}${act ? ` · ${act} downloading` : ''}`; }
+}
+$('#set-body').addEventListener('input', (e) => {
+  if (e.target.id !== 'dlp-q') return;
+  S.dlQ = e.target.value;
+  $('#dlp-list').innerHTML = dlPageList();
+});
+// Row buttons work the same on the page as in the panel.
+$('#set-body').addEventListener('click', (e) => {
+  const row = e.target.closest('#dlp-list .dl-row'); if (!row) return;
+  const id = +row.dataset.id;
+  const b = e.target.closest('[data-dl]');
+  if (b) { send({ t: 'dl' + b.dataset.dl, id }); return; }
+  if (e.target.closest('.dl-src')) { send({ t: 'open', url: S.dl.find((d) => d.id === id)?.url, newTab: true }); closeSettings(); return; }
+  if (row.classList.contains('done') && !row.classList.contains('gone')) send({ t: 'dlOpen', id });
+});

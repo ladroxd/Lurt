@@ -61,6 +61,12 @@ pub struct Settings {
     pub perm_notifications: String,
     /// Every new tab is private.
     pub always_private: bool,
+    /// Where downloads go; empty means the Windows Downloads folder.
+    pub download_dir: String,
+    /// Ask where to save every download.
+    pub download_ask: bool,
+    /// Per file type: what to do with downloads of that type.
+    pub download_rules: Vec<DownloadRule>,
     /// Delete on quit.
     pub exit_clear_history: bool,
     pub exit_clear_cookies: bool,
@@ -87,6 +93,16 @@ pub struct Settings {
     pub history_days: u32,
 }
 
+/// What to do with downloads of one file type.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(default)]
+pub struct DownloadRule {
+    /// Lowercase extension without the dot: "exe".
+    pub ext: String,
+    /// "allow" | "ask" (where to save) | "open" (when finished) | "block"
+    pub action: String,
+}
+
 /// A download in the downloads panel.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default)]
@@ -107,6 +123,9 @@ pub struct Download {
     /// From a private tab: shown but not saved.
     #[serde(skip)]
     pub private: bool,
+    /// Open the file when it finishes (a file type rule).
+    #[serde(skip)]
+    pub open: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -148,6 +167,9 @@ impl Default for Settings {
             perm_mic: "ask".into(),
             perm_notifications: "ask".into(),
             always_private: false,
+            download_dir: String::new(),
+            download_ask: false,
+            download_rules: Vec::new(),
             exit_clear_history: false,
             exit_clear_cookies: false,
             sleep_minutes: 30,

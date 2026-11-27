@@ -8,7 +8,7 @@
   // Browser shortcuts that WebView2 does not handle on its own.
   const KEYS = new Set([
     'ctrl+t', 'ctrl+w', 'ctrl+l', 'ctrl+tab', 'ctrl+shift+tab', 'ctrl+d', 'ctrl+h',
-    'ctrl+shift+t', 'ctrl+shift+n', 'ctrl+comma', 'ctrl+shift+b', 'ctrl+shift+o', 'alt+d', 'f6',
+    'ctrl+shift+t', 'ctrl+shift+n', 'ctrl+comma', 'ctrl+j', 'ctrl+shift+b', 'ctrl+shift+o', 'alt+d', 'f6',
     'ctrl+1', 'ctrl+2', 'ctrl+3', 'ctrl+4', 'ctrl+5', 'ctrl+6', 'ctrl+7', 'ctrl+8', 'ctrl+9',
   ]);
   addEventListener('keydown', (e) => {

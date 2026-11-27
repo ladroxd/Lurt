@@ -50,6 +50,30 @@ pub struct Shield {
     pub privacy: Cell<Privacy>,
     /// Sites that failed over HTTPS this session, so they load over HTTP.
     pub https_skip: RefCell<HashSet<String>>,
+    /// Download folder and file type rules, read when a download starts.
+    pub downloads: RefCell<DownloadPrefs>,
+}
+
+#[derive(Clone, Default)]
+pub struct DownloadPrefs {
+    /// Empty: the engine's default (the Windows Downloads folder).
+    pub dir: String,
+    pub ask: bool,
+    /// (extension, action)
+    pub rules: Vec<(String, String)>,
+}
+
+impl DownloadPrefs {
+    /// "allow" | "ask" | "open" | "block" for a file name.
+    pub fn action(&self, name: &str) -> &str {
+        let ext = std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        match self.rules.iter().find(|(e, _)| *e == ext) {
+            Some((_, a)) if a != "allow" || !self.ask => a,
+            Some(_) => "allow",
+            None if self.ask => "ask",
+            None => "allow",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]

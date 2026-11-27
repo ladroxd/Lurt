@@ -4,6 +4,7 @@
 //! browser UI ("chrome"), and one WebView2 per awake tab, all sharing one engine process.
 
 mod account;
+mod dialogs;
 mod privacy;
 mod blocker;
 mod glass;
@@ -60,7 +61,10 @@ pub enum Ev {
     /// The icon found on a site's homepage: (host, icon URL or "").
     FoundIcon(String, String),
     /// A page started a download (the file goes to the Downloads folder).
-    DlStart { tab: u32, dl: u32, path: String, url: String, total: i64 },
+    /// `ask`: waiting for "Save as". `open`: open the file when it finishes.
+    DlStart { tab: u32, dl: u32, path: String, url: String, total: i64, ask: bool, open: bool },
+    /// A download of a file type you blocked.
+    DlBlocked { tab: u32, name: String, url: String },
     /// (download, bytes received, total bytes or -1)
     DlProgress(u32, i64, i64),
     /// (download, state, why it failed, file path)
@@ -261,6 +265,7 @@ fn main() {
     shield.enabled.set(settings.adblock);
     *shield.allow.borrow_mut() = settings.adblock_allow.clone();
     shield.privacy.set(privacy_of(&settings));
+    *shield.downloads.borrow_mut() = download_prefs(&settings);
     blocker::load(store.dir.clone(), false, settings.filter_lists.clone(), proxy.clone());
 
     let mut app = App {
@@ -366,6 +371,18 @@ fn main() {
             }
         }
     });
+}
+
+fn download_prefs(s: &Settings) -> blocker::DownloadPrefs {
+    blocker::DownloadPrefs {
+        dir: s.download_dir.clone(),
+        ask: s.download_ask,
+        rules: s.download_rules.iter().map(|r| (r.ext.clone(), r.action.clone())).collect(),
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 fn privacy_of(s: &Settings) -> blocker::Privacy {
@@ -962,6 +979,7 @@ impl App {
             }
         }
         self.shield.privacy.set(privacy_of(s));
+        *self.shield.downloads.borrow_mut() = download_prefs(s);
         if old.filter_lists != s.filter_lists {
             self.toast("Updating filter lists...");
             blocker::load(self.store.dir.clone(), true, s.filter_lists.clone(), self.proxy.clone());
@@ -997,6 +1015,15 @@ impl App {
         self.push_state();
     }
 
+    /// The download folder you chose, or the Windows Downloads folder.
+    fn download_dir(&self) -> std::path::PathBuf {
+        let d = &self.settings.download_dir;
+        if !d.is_empty() && std::path::Path::new(d).is_dir() {
+            return d.into();
+        }
+        dirs::download_dir().unwrap_or_else(|| self.store.dir.clone())
+    }
+
     fn send_downloads(&self) {
         let exists: Vec<bool> = self.downloads.iter().map(|d| d.state != "done" || std::path::Path::new(&d.path).exists()).collect();
         let list: Vec<Value> = self
@@ -1008,7 +1035,8 @@ impl App {
                         "state": d.state, "reason": d.reason, "at": d.at, "gone": !ok })
             })
             .collect();
-        self.send(json!({ "t": "downloads", "list": list }));
+        let dir = self.download_dir().to_string_lossy().into_owned();
+        self.send(json!({ "t": "downloads", "list": list, "dir": dir }));
     }
 
     fn remember_icon(&mut self, host: &str, url: &str) {
@@ -1107,6 +1135,7 @@ impl App {
             }
             "ctrl+shift+o" => self.send(json!({ "t": "panel", "p": "bookmarks" })),
             "ctrl+comma" => self.send(json!({ "t": "panel", "p": "settings" })),
+            "ctrl+j" => self.send(json!({ "t": "panel", "p": "downloads" })),
             "ctrl+shift+t" => {
                 if let Some(url) = self.closed.pop() {
                     self.new_tab(Some(url), false);
@@ -1199,15 +1228,40 @@ impl App {
             }
             Ev::Cleared => self.exit_cleared = true,
             Ev::FoundIcon(host, url) => self.remember_icon(&host, &url),
-            Ev::DlStart { tab, dl, path, url, total } => {
+            Ev::DlStart { tab, dl, mut path, url, total, ask, open } => {
+                if ask {
+                    match dialogs::save_file(self.window.hwnd() as isize, &path) {
+                        Some(p) => {
+                            tabs::finish_ask(dl, Some(&p));
+                            path = p;
+                        }
+                        None => {
+                            tabs::finish_ask(dl, None);
+                            tabs::forget_download(dl);
+                            return;
+                        }
+                    }
+                }
                 let name = std::path::Path::new(&path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
                 let private = self.tab(tab).is_some_and(|t| t.private);
-                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
                 self.toast(&format!("Downloading {name}"));
                 self.downloads.insert(0, store::Download {
-                    id: dl, name: name.clone(), path, url, total, recv: 0, state: "progress".into(), reason: String::new(), at, private,
+                    id: dl, name: name.clone(), path, url, total, recv: 0, state: "progress".into(), reason: String::new(),
+                    at: now_secs(), private, open,
                 });
                 self.send(json!({ "t": "dlStart", "id": dl, "name": name }));
+                self.send_downloads();
+            }
+            Ev::DlBlocked { tab, name, url } => {
+                let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                self.toast(&format!("Blocked {name}: .{ext} downloads are turned off"));
+                let private = self.tab(tab).is_some_and(|t| t.private);
+                self.downloads.insert(0, store::Download {
+                    id: 1_000_000 + self.downloads.len() as u32 + now_secs() as u32 % 1_000_000, name, path: String::new(), url,
+                    state: "failed".into(), reason: format!(".{ext} downloads are turned off"), at: now_secs(), private,
+                    ..Default::default()
+                });
+                self.store.save_downloads(&self.downloads);
                 self.send_downloads();
             }
             Ev::DlProgress(dl, recv, total) => {
@@ -1233,6 +1287,9 @@ impl App {
                     tabs::forget_download(dl);
                     if state == "done" {
                         d.recv = d.total.max(d.recv);
+                        if d.open {
+                            let _ = std::process::Command::new("explorer").arg(&d.path).spawn();
+                        }
                         let name = d.name.clone();
                         self.send(json!({ "t": "dlDone", "id": dl, "name": name }));
                     }
@@ -1683,8 +1740,15 @@ impl App {
                 let _ = c.arg(&path).spawn();
             }
             "dlFolder" => {
-                let dir = dirs::download_dir().unwrap_or_else(|| self.store.dir.clone());
-                let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                let _ = std::process::Command::new("explorer").arg(self.download_dir()).spawn();
+            }
+            "dlPickDir" => {
+                let start = self.download_dir().to_string_lossy().into_owned();
+                if let Some(dir) = dialogs::pick_folder(self.window.hwnd() as isize, &start) {
+                    let mut s = self.settings.clone();
+                    s.download_dir = dir;
+                    self.apply_settings(s);
+                }
             }
             "dlRetry" => {
                 let id = m["id"].as_u64().unwrap_or(0) as u32;

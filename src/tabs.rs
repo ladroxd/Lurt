@@ -149,6 +149,25 @@ pub fn write_engine_prefs(root: &std::path::Path, s: &crate::store::Settings) {
 thread_local! {
     static DOWNLOADS: std::cell::RefCell<std::collections::HashMap<u32, ICoreWebView2DownloadOperation>> =
         Default::default();
+    /// Downloads waiting for "Save as": their start event and its deferral.
+    static ASKING: std::cell::RefCell<std::collections::HashMap<u32, (ICoreWebView2DownloadStartingEventArgs, ICoreWebView2Deferral)>> =
+        Default::default();
+}
+
+/// Finish a "Save as": save to `path`, or cancel the download if None.
+pub fn finish_ask(id: u32, path: Option<&str>) {
+    let Some((args, deferral)) = ASKING.with(|a| a.borrow_mut().remove(&id)) else { return };
+    unsafe {
+        match path {
+            Some(p) => {
+                let _ = args.SetResultFilePath(&HSTRING::from(p));
+            }
+            None => {
+                let _ = args.SetCancel(true);
+            }
+        }
+        let _ = deferral.Complete();
+    }
 }
 static NEXT_DOWNLOAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
@@ -477,7 +496,7 @@ unsafe fn hook(
 
         // --- downloads: Lurt shows them in its own panel instead of the engine's pop-up ---
         if let Ok(w4) = wv.cast::<ICoreWebView2_4>() {
-            let p = proxy.clone();
+            let (p, sh) = (proxy.clone(), shield.clone());
             w4.add_DownloadStarting(
                 &DownloadStartingEventHandler::create(Box::new(move |_, args| {
                     let Some(args) = args else { return Ok(()) };
@@ -486,13 +505,32 @@ unsafe fn hook(
                     let dl = NEXT_DOWNLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let mut s = PWSTR::null();
                     args.ResultFilePath(&mut s)?;
-                    let path = take_pwstr(s);
+                    let mut path = take_pwstr(s);
                     let mut s = PWSTR::null();
                     op.Uri(&mut s)?;
                     let url = take_pwstr(s);
                     let mut total = 0i64;
                     op.TotalBytesToReceive(&mut total)?;
-                    let _ = p.send_event(Ev::DlStart { tab: id, dl, path, url, total });
+
+                    // Your download settings: blocked types, another folder, "Save as".
+                    let prefs = sh.downloads.borrow().clone();
+                    let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let action = prefs.action(&name).to_string();
+                    if action == "block" {
+                        args.SetCancel(true)?;
+                        let _ = p.send_event(Ev::DlBlocked { tab: id, name, url });
+                        return Ok(());
+                    }
+                    if !prefs.dir.is_empty() && std::path::Path::new(&prefs.dir).is_dir() {
+                        path = crate::dialogs::unique_path(std::path::Path::new(&prefs.dir), &name).to_string_lossy().into_owned();
+                        args.SetResultFilePath(&HSTRING::from(path.as_str()))?;
+                    }
+                    let ask = action == "ask";
+                    if ask {
+                        let deferral = args.GetDeferral()?;
+                        ASKING.with(|a| a.borrow_mut().insert(dl, (args.clone(), deferral)));
+                    }
+                    let _ = p.send_event(Ev::DlStart { tab: id, dl, path, url, total, ask, open: action == "open" });
 
                     let mut tok = 0i64;
                     let p2 = p.clone();

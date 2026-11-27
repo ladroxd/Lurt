@@ -782,3 +782,40 @@ body.dl-open #dl-pop { display: block; animation: pop .2s var(--ease); }
 .dl-row:hover .dl-acts, .dl-row.progress .dl-acts, .dl-row.paused .dl-acts { opacity: 1; }
 .dl-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 26px 10px 30px; color: var(--fg3); font-size: 12.5px; }
 .dl-empty .i { width: 26px; height: 26px; opacity: .6; }
+
+/* Downloads page (Settings > Downloads) and the panel's footer */
+.dl-all { width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 10px 12px; border-radius: 10px;
+  border-top: 1px solid var(--hair); font-size: 12.5px; color: var(--fg2); text-align: left; }
+.dl-all .i { width: 16px; height: 16px; }
+.dl-all span { margin-left: auto; font-size: 11px; color: var(--fg3); }
+.dl-all:hover { background: var(--hover); color: rgb(var(--fg)); }
+.dlp-tabs { display: flex; gap: 6px; margin: 10px 0 4px; }
+.dlp-tabs button { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-size: 12.5px; color: var(--fg2);
+  border: 1px solid var(--hair); }
+.dlp-tabs button .i { width: 15px; height: 15px; }
+.dlp-tabs button:hover { background: var(--hover); color: rgb(var(--fg)); }
+.dlp-tabs button.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: rgb(var(--fg)); }
+.dlp-bar { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; }
+.dlp-search { flex: 1; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 10px;
+  background: var(--hover); border: 1px solid var(--hair); }
+.dlp-search .i { width: 15px; height: 15px; color: var(--fg3); }
+.dlp-search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: rgb(var(--fg)); font: inherit; font-size: 12.5px; }
+.dlp-count { font-size: 12px; color: var(--fg3); white-space: nowrap; padding: 0 4px; }
+.dl-list.page { max-height: none; overflow: visible; }
+.dl-day { margin: 18px 4px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg3); }
+.dl-list.page .dl-row { padding: 10px 12px; gap: 14px; }
+.dl-list.page .dl-ic { width: 40px; height: 40px; border-radius: 11px; font-size: 10.5px; }
+.dl-list.page .dl-txt b { font-size: 13.5px; }
+.dl-src { font-size: 11.5px; color: var(--accent); opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.dl-src:hover { opacity: 1; text-decoration: underline; }
+.dl-empty.big { padding: 70px 10px; font-size: 13px; }
+.dl-empty.big .i { width: 34px; height: 34px; }
+.set .path { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.row-btns { display: flex; gap: 6px; flex: none; }
+.rules { display: flex; flex-direction: column; }
+.set.rule { gap: 10px; }
+.set.rule .ext { min-width: 64px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; font-weight: 600; color: var(--accent); }
+.set.rule select { width: auto; min-width: 170px; }
+.set.rule.add { border-top: 1px solid var(--hair); margin-top: 4px; padding-top: 12px; }
+.set.rule.add input { flex: 1; min-width: 0; }
+.rules .btns { padding: 4px 6px 6px; }
