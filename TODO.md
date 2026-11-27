@@ -6,6 +6,7 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 
 - [x] Push `main` up to the Google account button (4442139).
 - [x] Push the skeleton, Delete all browser data, Chrome import, branded loading screen, Fewer processes and Privacy page commits.
+- [x] Push the downloads button, Downloads page and the built-in extensions plan (d214c6a).
 - [ ] Push `main`, then tag `v0.1.0` and push the tag. The release workflow builds `lurt.exe` and opens a **draft** release with the notes from `.github/release-notes/v0.1.0.md`.
 - [ ] Review the draft release on GitHub and publish it.
 
