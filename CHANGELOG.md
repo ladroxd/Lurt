@@ -5,6 +5,12 @@ All notable changes to Lurt are listed here, newest first.
 ## [Unreleased]
 
 ### Added
+### Changed
+### Fixed
+
+## [0.8.9] - 2026-11-27
+
+### Added
 
 - Drag the favourites on the start page to reorder them. Moving a most-visited site makes it a favourite, so it stays where you put it.
 
