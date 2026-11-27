@@ -1,6 +1,19 @@
 <p align="center"><img src="assets/lurt.png" width="96" alt="Lurt logo"></p>
 
-# Lurt
+<h1 align="center">Lurt</h1>
+
+<p align="center">
+  <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe">
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white" height="42" alt="Download Lurt for Windows">
+  </a>
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-8ab4ff?style=flat-square" alt="Version 0.1.0">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/size-~6%20MB-3ddc84?style=flat-square" alt="About 6 MB">
+  <img src="https://img.shields.io/badge/made%20with-Rust-dea584?style=flat-square&logo=rust&logoColor=white" alt="Made with Rust">
+</p>
+<p align="center"><sub>No installer: download <code>lurt.exe</code> and run it. <a href="https://github.com/ladroxd/Lurt/releases">All releases</a></sub></p>
 
 A light, fast browser for Windows, written in Rust, with a liquid-glass interface.
 

@@ -1,40 +1,71 @@
-# Builds lurt.exe and attaches it to a draft GitHub release whenever a version tag
-# (e.g. v0.1.0) is pushed. The release text comes from .github/release-notes/<tag>.md
-# (copy TEMPLATE.md to start one). Review the draft on GitHub, then publish it.
+# Makes a draft GitHub release for every Lurt version, with lurt.exe attached.
+#
+# - Push to main: if the version in Cargo.toml has no release yet (published or draft),
+#   a draft release for it is built. Bump the version in Cargo.toml to get a new one.
+# - Push a tag like v0.2.0: builds a draft for that tag (it must match Cargo.toml).
+# - Actions tab > Release > Run workflow: same as a push to main.
+#
+# The text comes from .github/release-notes/v<version>.md (copy TEMPLATE.md), or from that
+# version's section of CHANGELOG.md if there is no notes file. Review the draft on GitHub,
+# then publish it; publishing creates the tag.
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ "$GITHUB_REF_NAME" != "$tag" ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+              exit 1
+            fi
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Drafts are included when listing with this token.
+          if gh api "repos/$GITHUB_REPOSITORY/releases" --paginate -q '.[].tag_name' | grep -qx "$tag"; then
+            echo "Release $tag already exists (published or draft): nothing to do."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release for $tag yet: building a draft."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
     runs-on: windows-latest
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      - name: Check the tag matches Cargo.toml
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          if ("v$version" -ne "${{ github.ref_name }}") {
-            Write-Error "Tag ${{ github.ref_name }} doesn't match Cargo.toml version $version"
-            exit 1
-          }
-
-      - name: Check the release notes exist
-        shell: pwsh
-        run: |
-          if (-not (Test-Path ".github/release-notes/${{ github.ref_name }}.md")) {
-            Write-Error "Missing .github/release-notes/${{ github.ref_name }}.md"
-            exit 1
-          }
 
       - name: Test
         run: cargo test --release --locked
@@ -49,11 +80,32 @@ jobs:
           $hash = (Get-FileHash lurt.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  lurt.exe" | Out-File -Encoding ascii lurt.exe.sha256
 
+      - name: Release notes
+        shell: pwsh
+        run: |
+          $notes = ".github/release-notes/$env:TAG.md"
+          if (Test-Path $notes) {
+            Copy-Item $notes release-notes.md
+          } else {
+            # This version's section of CHANGELOG.md, without its heading.
+            $version = $env:TAG.TrimStart('v')
+            $lines = Get-Content CHANGELOG.md
+            $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]" | Select-Object -First 1).LineNumber
+            if (-not $start) { Write-Error "No $notes and no [$version] section in CHANGELOG.md"; exit 1 }
+            $body = @()
+            foreach ($l in $lines[$start..($lines.Count - 1)]) { if ($l -match '^## ') { break }; $body += $l }
+            $repo = "${{ github.repository }}"
+            $head = "**Download Lurt:** [Windows (lurt.exe)](https://github.com/$repo/releases/download/$env:TAG/lurt.exe) · [SHA-256 checksum](https://github.com/$repo/releases/download/$env:TAG/lurt.exe.sha256)`n"
+            ($head + "`n" + ($body -join "`n")) | Out-File -Encoding utf8 release-notes.md
+          }
+
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
-          name: Lurt ${{ github.ref_name }}
-          body_path: .github/release-notes/${{ github.ref_name }}.md
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Lurt ${{ env.TAG }}
+          body_path: release-notes.md
           files: |
             lurt.exe
             lurt.exe.sha256

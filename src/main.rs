@@ -1125,7 +1125,7 @@ impl App {
             "ctrl+l" | "alt+d" | "f6" => self.focus_address(),
             "ctrl+tab" => self.cycle(1),
             "ctrl+shift+tab" => self.cycle(-1),
-            "ctrl+d" => self.toggle_star(),
+            "ctrl+d" => self.send(json!({ "t": "starPop" })),
             "ctrl+h" => self.send(json!({ "t": "panel", "p": "history" })),
             // Like Chrome: Ctrl+Shift+B shows or hides the bookmarks bar.
             "ctrl+shift+b" => {
@@ -1618,6 +1618,17 @@ impl App {
                 let url = s("url");
                 if !url.is_empty() {
                     self.store.add_bookmark(&url, &s("title"), m["parent"].as_i64().unwrap_or(0));
+                    self.bookmarks_changed();
+                }
+            }
+            // From the bookmark card: put the page in a new folder made there.
+            "bmAddNew" => {
+                let url = s("url");
+                let name = s("folder");
+                if !url.is_empty() && !name.trim().is_empty() {
+                    let id = self.store.add_folder(name.trim(), m["parent"].as_i64().unwrap_or(0));
+                    self.store.add_bookmark(&url, &s("title"), id);
+                    self.send(json!({ "t": "bmFolderMade", "id": id }));
                     self.bookmarks_changed();
                 }
             }

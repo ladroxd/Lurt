@@ -298,7 +298,7 @@ $('#back').onclick = () => send({ t: 'nav', a: 'back' });
 $('#fwd').onclick = () => send({ t: 'nav', a: 'forward' });
 $('#reload').onclick = () => send({ t: 'nav', a: 'reload' });
 $('#home').onclick = () => send({ t: 'nav', a: 'home' });
-$('#star').onclick = () => send({ t: 'star' });
+$('#star').onclick = () => (S.overlay === 'star-open' ? closeStar(true) : openStar());
 $('#shield').onclick = () => (S.overlay === 'shield-open' ? closeShield() : openShield());
 
 // ---- waking tab ------------------------------------------------------------
@@ -913,7 +913,10 @@ function bmSync() {
   }, 0);
 }
 
+// No folder menus while a bookmark window or the bookmark card is open: they'd cover it.
+const bmBusy = () => document.body.classList.contains('dlg-open') || S.overlay === 'star-open';
 function openBmMenu(parent, anchor, level, list) {
+  if (bmBusy()) return;
   closeBmMenus(level, true);
   const m = document.createElement('div');
   m.className = 'bm-menu glass';
@@ -970,13 +973,14 @@ document.addEventListener('auxclick', (e) => {
 });
 // Hovering moves between open folders, like a menu bar.
 document.addEventListener('mouseover', (e) => {
+  if (bmBusy()) return;
   const chip = e.target.closest('#bmbar .bm.fold');
   if (chip && S.bmMenus[0] && S.bmMenus[0]._anchor !== chip) { openBmMenu(+chip.dataset.f, chip, 0); return; }
   const m = e.target.closest('.bm-menu'); if (!m) return;
   const b = e.target.closest('.bm');
   clearTimeout(S.bmHover);
   S.bmHover = setTimeout(() => {
-    if (!m.isConnected || S.drag) return;
+    if (!m.isConnected || S.drag || bmBusy()) return;
     if (b && b.dataset.k === 'f') { if (S.bmMenus[m._level + 1]?._anchor !== b) openBmMenu(+b.dataset.f, b, m._level + 1); }
     else if (b) closeBmMenus(m._level + 1, true);
   }, 220);
@@ -2334,3 +2338,96 @@ $('#set-body').addEventListener('click', (e) => {
   if (e.target.closest('.dl-src')) { send({ t: 'open', url: S.dl.find((d) => d.id === id)?.url, newTab: true }); closeSettings(); return; }
   if (row.classList.contains('done') && !row.classList.contains('gone')) send({ t: 'dlOpen', id });
 });
+
+// ---- bookmark card (star / Ctrl+D) ------------------------------------------------------
+// Like Chrome: the star saves the page right away and opens a card to rename it, pick its
+// folder (or make one), or remove it. On a bookmarked page it opens the same card to edit.
+const starBtn = $('#star'); const starPop = $('#star-pop');
+S.bmLast = 0; try { S.bmLast = +(localStorage.getItem('lurt.bmFolder') || 0); } catch (_) {}
+function folderOptions(sel) {
+  const out = [[0, 'Bookmarks bar', 0]];
+  const walk = (p, depth) => {
+    for (const x of bmKids(p)) if (x.k === 'f') { out.push([x.id, bmName(x), depth]); walk(x.id, depth + 1); }
+  };
+  walk(0, 1);
+  return out.map(([id, name, d]) => `<option value="${id}" ${id === sel ? 'selected' : ''}>${'\u00a0\u00a0\u00a0'.repeat(d)}${esc(name)}</option>`).join('') +
+    '<option value="new">New folder…</option>';
+}
+function renderStar() {
+  const st = S.starEdit; if (!st) return;
+  starPop.innerHTML = `<div class="sp-head"><b>${st.added ? 'Bookmark added' : 'Edit bookmark'}</b></div>` +
+    `<label class="sp-row"><span>Name</span><input class="field" id="sp-name" value="${esc(st.title)}" spellcheck="false"></label>` +
+    `<label class="sp-row"><span>Folder</span><select class="field" id="sp-folder">${folderOptions(st.parent)}</select></label>` +
+    `<label class="sp-row sp-new ${st.newFolder ? '' : 'hide'}"><span>New folder</span><input class="field" id="sp-newname" placeholder="Folder name" spellcheck="false"></label>` +
+    `<div class="sp-acts"><button class="btn" data-sp="remove">${icon('trash')}Remove</button><button class="btn primary" data-sp="done">Done</button></div>`;
+}
+function placeStar() {
+  const r = starBtn.getBoundingClientRect();
+  starPop.style.top = r.bottom + 10 + 'px';
+  starPop.style.left = Math.max(8, Math.min(r.right - 320 + 10, innerWidth - 328)) + 'px';
+}
+function openStar() {
+  const t = cur(); if (!t || !t.url || settingsOpen()) return;
+  if (S.overlay === 'omni-open') addr.blur();
+  if (S.overlay === 'bm-open') closeBmMenus();
+  if (S.overlay) closeOverlay(false);
+  const mark = findMark(t.url);
+  const title = mark ? bmName(mark) : (t.title || pretty(t.url));
+  const parent = mark ? (S.bm.folders.has(mark.parent) ? mark.parent : 0) : (S.bm.folders.has(S.bmLast) ? S.bmLast : 0);
+  S.starEdit = { url: t.url, title, parent, origTitle: title, origParent: parent, added: !mark, newFolder: false };
+  if (!mark) send({ t: 'bmAdd', url: t.url, title, parent });
+  renderStar(); placeStar();
+  openOverlay('star-open');
+  requestAnimationFrame(() => { const n = $('#sp-name'); if (n) { n.focus(); n.select(); } });
+}
+// Save what the card shows (on Done, Enter, or clicking away).
+function saveStar() {
+  const st = S.starEdit; if (!st || st.removed) return;
+  const title = ($('#sp-name')?.value || '').trim() || st.origTitle;
+  const fsel = $('#sp-folder')?.value;
+  if (fsel === 'new') {
+    const name = ($('#sp-newname')?.value || '').trim();
+    if (name) { send({ t: 'bmAddNew', url: st.url, title, folder: name, parent: st.origParent }); S.bmPendingLast = true; }
+    else if (title !== st.origTitle) send({ t: 'bmEdit', url: st.url, newUrl: st.url, title });
+    return;
+  }
+  const parent = +fsel || 0;
+  if (parent !== st.origParent) send({ t: 'bmAdd', url: st.url, title, parent });
+  else if (title !== st.origTitle) send({ t: 'bmEdit', url: st.url, newUrl: st.url, title });
+  S.bmLast = parent; try { localStorage.setItem('lurt.bmFolder', String(parent)); } catch (_) {}
+}
+function closeStar(focusPage) {
+  if (S.overlay !== 'star-open') return;
+  saveStar();
+  S.starEdit = null;
+  closeOverlay(focusPage);
+}
+H.starPop = () => (S.overlay === 'star-open' ? closeStar(true) : openStar());
+H.bmFolderMade = (m) => {
+  if (!S.bmPendingLast) return;
+  S.bmPendingLast = false; S.bmLast = m.id;
+  try { localStorage.setItem('lurt.bmFolder', String(m.id)); } catch (_) {}
+};
+starPop.addEventListener('change', (e) => {
+  if (e.target.id !== 'sp-folder' || !S.starEdit) return;
+  const isNew = e.target.value === 'new';
+  starPop.querySelector('.sp-new').classList.toggle('hide', !isNew);
+  if (isNew) $('#sp-newname').focus();
+});
+starPop.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sp]'); if (!b || !S.starEdit) return;
+  if (b.dataset.sp === 'remove') {
+    send({ t: 'delBookmark', url: S.starEdit.url });
+    S.starEdit.removed = true;
+    toast('Bookmark removed');
+  }
+  closeStar(true);
+});
+starPop.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); closeStar(true); }
+});
+addEventListener('mousedown', (e) => {
+  if (S.overlay === 'star-open' && !starPop.contains(e.target) && !starBtn.contains(e.target)) closeStar(false);
+}, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'star-open') { e.preventDefault(); closeStar(true); } });
+addEventListener('resize', () => S.overlay === 'star-open' && placeStar());
