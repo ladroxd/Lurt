@@ -1,4 +1,4 @@
-# Makes a draft GitHub release for every Lurt version, with lurt.exe attached.
+# Makes a draft GitHub release for every Lurt version, with Lurt.exe attached.
 #
 # - Push to main: if the version in Cargo.toml has no release yet (published or draft),
 #   a draft release for it is built. Bump the version in Cargo.toml to get a new one.
@@ -75,9 +75,9 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          Copy-Item target/release/lurt.exe lurt.exe
-          $hash = (Get-FileHash lurt.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  lurt.exe" | Out-File -Encoding ascii lurt.exe.sha256
+          Copy-Item target/release/Lurt.exe Lurt.exe
+          $hash = (Get-FileHash Lurt.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  Lurt.exe" | Out-File -Encoding ascii Lurt.exe.sha256
 
       # For the Microsoft Store: only once the app's Store identity is set (packaging/STORE.md).
       - name: MSIX package
@@ -111,7 +111,7 @@ jobs:
             $body = @()
             foreach ($l in $lines[$start..($lines.Count - 1)]) { if ($l -match '^## ') { break }; $body += $l }
             $repo = "${{ github.repository }}"
-            $head = "**Download Lurt:** [Windows (lurt.exe)](https://github.com/$repo/releases/download/$env:TAG/lurt.exe) · [SHA-256 checksum](https://github.com/$repo/releases/download/$env:TAG/lurt.exe.sha256)`n"
+            $head = "**Download Lurt:** [Windows (Lurt.exe)](https://github.com/$repo/releases/download/$env:TAG/Lurt.exe) · [SHA-256 checksum](https://github.com/$repo/releases/download/$env:TAG/Lurt.exe.sha256)`n"
             ($head + "`n" + ($body -join "`n")) | Out-File -Encoding utf8 release-notes.md
           }
 
@@ -123,5 +123,5 @@ jobs:
           name: Lurt ${{ env.TAG }}
           body_path: release-notes.md
           files: |
-            lurt.exe
-            lurt.exe.sha256
+            Lurt.exe
+            Lurt.exe.sha256

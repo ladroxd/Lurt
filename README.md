@@ -3,7 +3,7 @@
 <h1 align="center">Lurt</h1>
 
 <p align="center">
-  <a href="https://github.com/ladroxd/Lurt/releases/latest/download/lurt.exe"><img src="assets/readme/download.svg" width="300" alt="Download Lurt for Windows"></a>
+  <a href="https://github.com/ladroxd/Lurt/releases/latest/download/Lurt.exe"><img src="assets/readme/download.svg" width="300" alt="Download Lurt for Windows"></a>
 </p>
 <p align="center">
   <img src="assets/readme/version.svg" alt="Version 0.8.8">
@@ -11,11 +11,11 @@
   <img src="assets/readme/size.svg" alt="About 6 MB">
   <img src="assets/readme/rust.svg" alt="Made with Rust">
 </p>
-<p align="center"><sub>No installer: download <code>lurt.exe</code> and run it. <a href="https://github.com/ladroxd/Lurt/releases">All releases</a></sub></p>
+<p align="center"><sub>No installer: download <code>Lurt.exe</code> and run it. <a href="https://github.com/ladroxd/Lurt/releases">All releases</a></sub></p>
 
 A light, fast browser for Windows, written in Rust, with a liquid-glass interface.
 
-- **Engine:** the WebView2 (Chromium) runtime that ships with Windows, so there is no bundled browser engine. `lurt.exe` is about 6 MB.
+- **Engine:** the WebView2 (Chromium) runtime that ships with Windows, so there is no bundled browser engine. `Lurt.exe` is about 6 MB.
 - **Window:** [tao](https://crates.io/crates/tao) + [wry](https://crates.io/crates/wry), borderless with a native blur/acrylic/mica backdrop.
 - **Tabs:** one WebView2 per awake tab, all sharing one engine process. New tabs and restored tabs cost nothing until you open them, and idle background tabs go to sleep.
 - **Blocking:** Brave's [adblock-rust](https://crates.io/crates/adblock) engine (EasyList, EasyPrivacy, Peter Lowe's list) on every network request, plus cosmetic filtering and WebView2's built-in tracking prevention.
@@ -24,7 +24,7 @@ A light, fast browser for Windows, written in Rust, with a liquid-glass interfac
 
 ```powershell
 cargo run --release                 # build and start
-target\release\lurt.exe github.com  # open a page (or search terms) in a new tab
+target\release\Lurt.exe github.com  # open a page (or search terms) in a new tab
 ```
 
 ## Startup

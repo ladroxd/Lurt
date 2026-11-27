@@ -480,6 +480,11 @@ impl Store {
         q.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect()).unwrap_or_default()
     }
 
+    /// Whether the site's icon is saved as a picture, not just an address.
+    pub fn has_picture(&self, host: &str) -> bool {
+        self.db.query_row("SELECT 1 FROM icons WHERE host=?1 AND url LIKE 'data:%'", [host], |_| Ok(())).is_ok()
+    }
+
     /// Remember a site's icon; true if it changed.
     pub fn set_icon(&self, host: &str, url: &str) -> bool {
         let old: Option<String> = self.db.query_row("SELECT url FROM icons WHERE host=?1", [host], |r| r.get(0)).ok();

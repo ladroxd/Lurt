@@ -1,6 +1,6 @@
 # Publishing Lurt in the Microsoft Store
 
-The Store signs MSIX packages itself, so Store installs show no SmartScreen warning. It does not sign the `lurt.exe` on GitHub.
+The Store signs MSIX packages itself, so Store installs show no SmartScreen warning. It does not sign the `Lurt.exe` on GitHub.
 
 1. Register a developer account at <https://storedeveloper.microsoft.com>.
 2. In Partner Center, create a new MSIX app and reserve its name.

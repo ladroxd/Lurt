@@ -5,8 +5,18 @@ All notable changes to Lurt are listed here, newest first.
 ## [Unreleased]
 
 ### Added
+
+- Drag the favourites on the start page to reorder them. Moving a most-visited site makes it a favourite, so it stays where you put it.
+
 ### Changed
+
+- The program file is now `Lurt.exe`, with a capital L.
+- The tab volume mixer opens over the live page, which no longer blurs or freezes.
+
 ### Fixed
+
+- Tabs with a website in them can be dragged to reorder, not only empty ones. A tab is now selected when you release the mouse button.
+- Discord and other sites that only give their icon to their own pages now show it: Lurt takes the icon from the page itself. It appears after you open the site once.
 
 ## [0.8.8] - 2026-11-27
 

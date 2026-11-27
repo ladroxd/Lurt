@@ -145,7 +145,7 @@ const H = {
     if (!m.img) { S.previews.delete(m.id); renderWake(cur()); return; }
     shrinkPreview(m.img).then((small) => { S.previews.set(m.id, small); renderWake(cur()); });
   },
-  pageDown() { if (S.panel) closePanel(); },
+  pageDown() { if (S.panel) closePanel(); closeVol(); },
   shieldInfo(m) {
     if (m.id !== S.active) return;
     S.shieldInfo = m;
@@ -238,9 +238,13 @@ $('#tablist').addEventListener('mousedown', (e) => {
   if (e.button === 1) { e.preventDefault(); send({ t: 'close', id }); return; }
   if (e.button !== 0) return;
   if (e.target.closest('.x, .snd')) return;
-  if (id !== S.active) send({ t: 'activate', id });
+  // The tab is activated on release: showing its page takes the focus, which would cut a
+  // drag short. preventDefault stops the icon being dragged as a picture.
+  e.preventDefault();
+  if (document.activeElement === box) box.blur();
   tabDrag = { el, id, x: e.clientX, grab: e.clientX - el.getBoundingClientRect().left, on: false };
 });
+$('#tablist').addEventListener('dragstart', (e) => e.preventDefault());
 // Drag a tab along the strip: it follows the pointer and the others slide out of its way.
 let tabDrag = null;
 addEventListener('mousemove', (e) => {
@@ -274,16 +278,17 @@ addEventListener('mousemove', (e) => {
 function endTabDrag() {
   const d = tabDrag; if (!d) return;
   tabDrag = null;
-  if (!d.on) return;
+  const activate = () => { if (d.el.isConnected && d.id !== S.active) send({ t: 'activate', id: d.id }); };
+  if (!d.on) { activate(); return; }
   d.el.classList.remove('dragging');
   d.el.style.transform = '';
   const ids = [...$('#tablist').children].map((x) => +x.dataset.id);
   S.tabs.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
   renderTabs();
   send({ t: 'tabOrder', ids });
+  activate();
 }
 addEventListener('mouseup', endTabDrag);
-addEventListener('blur', endTabDrag);
 $('#tablist').addEventListener('click', (e) => {
   const snd = e.target.closest('.snd');
   if (snd) { toggleMute(+snd.closest('.tab').dataset.id); return; }
@@ -438,6 +443,11 @@ S.brandTried = new Set();
 function brandFromTabs() {
   for (const t of S.tabs || []) {
     const host = hostOf(t.url);
+    if (host && t.fav?.startsWith('data:') && !S.brand.get(host) && !S.brandTried.has(host)) {
+      S.brandTried.add(host);
+      iconColor(t.fav, (c) => S.brand.set(host, c || ''));
+      continue;
+    }
     if (!host || !t.fav || !/^https?:/.test(t.fav) || S.brandTried.has(host)) continue;
     if (BRANDS[siteName(t.url).toLowerCase()] || S.brand.get(host)) continue;
     if (S.brand.get(host) === null) continue; // a lookup is still running
@@ -610,6 +620,7 @@ const sugg = $('#sugg');
 // Anything drawn over the page (address suggestions, shield popover) asks Rust to swap
 // the live page for a blurred snapshot, since the page is a native view on top of us.
 function openOverlay(cls = 'omni-open') {
+  closeVol();
   if (S.overlay) return;
   S.overlay = cls;
   document.body.classList.add(cls);
@@ -773,6 +784,14 @@ function iconImg(host, fallback, attr = 'src') {
   const src = known || `https://${host}/favicon.ico`;
   return `<img ${attr}="${esc(src)}" alt="" onerror="iconMiss(${esc(JSON.stringify(host))});this.outerHTML=${esc(JSON.stringify(fallback))}">`;
 }
+// Start page tiles are bigger than the engine's small picture of an icon, so they try the
+// site's own file first and fall back to the picture.
+function tileIcon(host, fallback) {
+  const picture = S.icons[host];
+  if (!picture?.startsWith('data:')) return iconImg(host, fallback);
+  return `<img src="${esc(`https://${host}/favicon.ico`)}" alt="" data-picture="${esc(picture)}" ` +
+    `onerror="if(this.dataset.picture){this.src=this.dataset.picture;delete this.dataset.picture}else this.outerHTML=${esc(JSON.stringify(fallback))}">`;
+}
 function iconMiss(host) {
   if (S.icons[host] !== undefined || S.iconAsked.has(host)) return;
   S.iconAsked.add(host);
@@ -794,15 +813,57 @@ function knownIcon(url, title) {
   return src ? `<img src="${esc(src)}" alt="" onerror="this.outerHTML=${esc(JSON.stringify(fallback))}">` : fallback;
 }
 function renderTiles() {
+  if (tileDrag?.on) return; // redrawn when you let go
   S.tiles = tileList();
   $('#tiles').innerHTML = S.tiles.map((i, n) => {
     const host = hostOf(i.url);
     return `<button class="tile${i.pinned ? ' pinned' : ''}" data-i="${n}" data-url="${esc(i.url)}" title="${esc(i.title || i.url)}"><span class="ic glass">` +
-      `${iconImg(host, letter(i.url, i.title))}</span><span>${esc(tileName(i))}</span></button>`;
+      `${tileIcon(host, letter(i.url, i.title))}</span><span>${esc(tileName(i))}</span></button>`;
   }).join('');
 }
 $('#tile-add').innerHTML = icon('plus');
 $('#tile-add').onclick = () => editTile(null);
+// Drag a tile to reorder. Everything up to the one you moved becomes a favourite, since
+// only favourites keep their place (the rest follow how often you visit them).
+var tileDrag = null;
+$('#tiles').addEventListener('dragstart', (e) => e.preventDefault());
+$('#tiles').addEventListener('mousedown', (e) => {
+  const el = e.target.closest('.tile'); if (!el || e.button !== 0) return;
+  const r = el.getBoundingClientRect();
+  tileDrag = { el, x: e.clientX, y: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, on: false };
+});
+addEventListener('mousemove', (e) => {
+  const d = tileDrag; if (!d) return;
+  if (!(e.buttons & 1) || !d.el.isConnected) { endTileDrag(); return; }
+  if (!d.on) {
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
+    d.on = true;
+    d.el.classList.add('dragging');
+  }
+  // Layout positions ignore the transform on the tile being dragged.
+  const o = d.el.offsetParent.getBoundingClientRect();
+  const px = e.clientX - o.left, py = e.clientY - o.top;
+  const all = [...$('#tiles').children];
+  const over = all.find((t) => t !== d.el && px >= t.offsetLeft && px < t.offsetLeft + t.offsetWidth &&
+    py >= t.offsetTop && py < t.offsetTop + t.offsetHeight);
+  if (over) $('#tiles').insertBefore(d.el, all.indexOf(d.el) < all.indexOf(over) ? over.nextElementSibling : over);
+  d.el.style.transform = `translate(${px - d.gx - d.el.offsetLeft}px, ${py - d.gy - d.el.offsetTop}px)`;
+});
+function endTileDrag() {
+  const d = tileDrag; if (!d) return;
+  tileDrag = null;
+  if (!d.on) return;
+  // Letting go over a tile must not open it.
+  d.el.addEventListener('click', (e) => e.stopPropagation(), { capture: true, once: true });
+  setTimeout(() => {
+    const shown = [...$('#tiles').children].map((x) => S.tiles[+x.dataset.i]);
+    const moved = S.tiles[+d.el.dataset.i];
+    const upTo = Math.max(shown.indexOf(moved), ...shown.map((t, n) => (t.pinned ? n : -1)));
+    const list = shown.slice(0, upTo + 1).map((t) => ({ title: t.pinned ? t.title : tileName(t), url: t.url }));
+    setSetting('shortcuts', list);
+  });
+}
+addEventListener('mouseup', endTileDrag);
 $('#tiles').addEventListener('click', (e) => {
   const b = e.target.closest('.tile[data-url]'); if (b) send({ t: 'open', url: b.dataset.url, newTab: e.ctrlKey });
 });
@@ -1563,7 +1624,6 @@ function openSettings(sec) {
   hideMenu();
   if (S.overlay === 'shield-open') closeShield(false);
   if (S.overlay === 'omni-open') box.blur();
-  closeVol(false);
   if (!settingsOpen()) openOverlay('settings-open');
   renderSetNav();
   renderSettings(true);
@@ -2397,8 +2457,8 @@ function renderVol() {
   volBtn.classList.toggle('on', list.length > 0);
   const silent = list.length > 0 && list.every((t) => t.muted || t.volume === 0);
   if (volBtn._silent !== silent) { volBtn._silent = silent; volBtn.innerHTML = icon(silent ? 'soundOff' : 'sound'); }
-  if (S.overlay !== 'vol-open') return;
-  if (!list.length || volPop._tab !== S.active) { closeVol(false); return; }
+  if (!S.volOpen) return;
+  if (!list.length || volPop._tab !== S.active) { closeVol(); return; }
   // Rebuild only when the set of tabs changes, so a slider you're dragging stays put.
   const key = list.map((t) => t.id).join();
   if (volPop._key !== key) {
@@ -2419,23 +2479,34 @@ function renderVol() {
     const b = row.querySelector('[data-mute]');
     if (b._quiet !== quiet) { b._quiet = quiet; b.innerHTML = icon(quiet ? 'soundOff' : 'sound'); b.title = quiet ? 'Unmute' : 'Mute'; }
   }
+  placeVol();
 }
 function placeVol() {
   const r = volBtn.getBoundingClientRect();
   volPop.style.top = r.bottom + 8 + 'px';
   volPop.style.left = Math.max(8, Math.min(r.right - 320 + 6, innerWidth - 328)) + 'px';
+  // The page is a native view above the toolbar: cut the popup's shape out of it.
+  const hole = [volPop.offsetLeft, volPop.offsetTop, volPop.offsetWidth, volPop.offsetHeight, parseFloat(getComputedStyle(volPop).borderTopLeftRadius) || 0];
+  if (volPop._hole !== hole.join()) { volPop._hole = hole.join(); send({ t: 'hole', r: hole }); }
 }
 function openVol() {
   if (settingsOpen() || !soundTabs().length) return;
   if (S.overlay === 'omni-open') box.blur();
   if (S.overlay === 'bm-open') closeBmMenus();
   if (S.overlay) closeOverlay(false);
-  volPop._key = ''; volPop._tab = S.active;
-  openOverlay('vol-open');
-  renderVol(); placeVol();
+  volPop._key = ''; volPop._tab = S.active; volPop._hole = '';
+  S.volOpen = true;
+  document.body.classList.add('vol-open');
+  renderVol();
 }
-function closeVol(focusPage) { if (S.overlay === 'vol-open') closeOverlay(focusPage); }
-volBtn.onclick = () => (S.overlay === 'vol-open' ? closeVol(true) : openVol());
+function closeVol(focusPage) {
+  if (!S.volOpen) return;
+  S.volOpen = false;
+  document.body.classList.remove('vol-open');
+  send({ t: 'hole', r: null });
+  if (focusPage) send({ t: 'focusPage' });
+}
+volBtn.onclick = () => (S.volOpen ? closeVol(true) : openVol());
 volPop.addEventListener('input', (e) => {
   const row = e.target.closest('.vol-row'); if (row) setSound(+row.dataset.id, { volume: +e.target.value, muted: false });
 });
@@ -2443,10 +2514,10 @@ volPop.addEventListener('click', (e) => {
   const b = e.target.closest('[data-mute]'); if (b) toggleMute(+b.closest('.vol-row').dataset.id);
 });
 addEventListener('mousedown', (e) => {
-  if (S.overlay === 'vol-open' && !volPop.contains(e.target) && !volBtn.contains(e.target)) closeVol(false);
+  if (S.volOpen && !volPop.contains(e.target) && !volBtn.contains(e.target)) closeVol();
 }, true);
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.overlay === 'vol-open') { e.preventDefault(); closeVol(true); } });
-addEventListener('resize', () => S.overlay === 'vol-open' && placeVol());
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.volOpen) { e.preventDefault(); closeVol(true); } });
+addEventListener('resize', () => S.volOpen && placeVol());
 
 // ---- downloads page (Settings > Downloads), like chrome://downloads ----------------------
 S.dlTab = 'all'; S.dlQ = '';

@@ -5,6 +5,11 @@ edition = "2024"
 description = "A light, fast, glass-styled web browser"
 license = "MIT"
 
+# The program is Lurt.exe, with a capital L.
+[[bin]]
+name = "Lurt"
+path = "src/main.rs"
+
 [dependencies]
 adblock = "0.13"
 base64 = "0.22"

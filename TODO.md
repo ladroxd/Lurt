@@ -11,7 +11,7 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 
 ## Trust and antivirus
 
-- [ ] Find out which antivirus flags `lurt.exe` and the detection name, then report it to that vendor as a false positive (Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission). Repeat for new releases while unsigned.
+- [ ] Find out which antivirus flags `Lurt.exe` and the detection name, then report it to that vendor as a false positive (Microsoft: https://www.microsoft.com/en-us/wdsi/filesubmission). Repeat for new releases while unsigned.
 - [ ] Code-sign releases: apply to SignPath Foundation (free for open source, https://signpath.org/apply) and sign in the release workflow, or buy a certificate. After approval: add the signing step to the release workflow and update `CODE_SIGNING.md`.
 - [ ] Turn on two-factor sign-in on GitHub (SignPath requires it).
 - [ ] Microsoft Store: register, reserve the name and set the identity variables (`packaging/STORE.md`).
@@ -20,8 +20,8 @@ What's still pending for Lurt. Finished work moves to [CHANGELOG.md](CHANGELOG.m
 ## Updates
 
 - [ ] The auto updater must stay off in the Microsoft Store build (the Store updates it).
-- [ ] **Auto updater.** Check GitHub releases for a newer version than the one running (at startup, then every few hours, and from a "Check for updates" button in Settings > About). Compare versions properly (0.10.0 is newer than 0.9.0), skip drafts, and verify the download against the release's `lurt.exe.sha256` before using it.
-- [ ] Download the new `lurt.exe` in the background with progress, then offer "Restart to update" (or update on the next launch). Swap the running exe safely: rename the old one, move the new one in, restart, and roll back if the new version fails to start.
+- [ ] **Auto updater.** Check GitHub releases for a newer version than the one running (at startup, then every few hours, and from a "Check for updates" button in Settings > About). Compare versions properly (0.10.0 is newer than 0.9.0), skip drafts, and verify the download against the release's `Lurt.exe.sha256` before using it.
+- [ ] Download the new `Lurt.exe` in the background with progress, then offer "Restart to update" (or update on the next launch). Swap the running exe safely: rename the old one, move the new one in, restart, and roll back if the new version fails to start.
 - [ ] Settings > About: current version, last checked time, "Check for updates", and a switch for automatic updates (on by default).
 - [ ] **What's new window.** After an update, the first launch shows a styled glass window with what changed in that version: New, Changed and Fixed sections taken from the release notes, with headlines and short descriptions. It shows once per version and never again until the next update (remember the last version shown in the profile). Also reachable from Settings > About ("What's new").
 - [ ] If several versions were skipped, the window lists each one's changes, newest first.

@@ -23,7 +23,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="Lurt" Executable="lurt.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Lurt" Executable="Lurt.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="{DisplayName}" Description="A light, fast, glass-styled web browser"
         BackgroundColor="transparent" Square150x150Logo="images\Square150x150Logo.png" Square44x44Logo="images\Square44x44Logo.png" />
     </Application>

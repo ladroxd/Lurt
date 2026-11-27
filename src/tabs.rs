@@ -9,7 +9,7 @@ use webview2_com::{
     BytesReceivedChangedEventHandler, ClearBrowsingDataCompletedHandler, DownloadStartingEventHandler,
     HistoryChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, StateChangedEventHandler, Microsoft::Web::WebView2::Win32::*,
     NavigationCompletedEventHandler, NavigationStartingEventHandler, PermissionRequestedEventHandler,
-    SourceChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
+    FaviconChangedEventHandler, GetFaviconCompletedHandler, SourceChangedEventHandler, WebResourceRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
 };
 use windows::{
     Win32::System::Com::{IStream, STATFLAG_NONAME, STATSTG, STREAM_SEEK_SET},
@@ -619,6 +619,36 @@ unsafe fn hook(
             })),
             &mut token,
         )?;
+
+        // --- the page's icon, as the engine loaded it ---
+        // Asking for the file again from the toolbar fails on sites that only serve it to
+        // their own pages (Discord), so take the picture the engine already has.
+        if let Ok(w15) = wv.cast::<ICoreWebView2_15>() {
+            let p = proxy.clone();
+            w15.add_FaviconChanged(
+                &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+                    let Some(w) = sender.and_then(|s| s.cast::<ICoreWebView2_15>().ok()) else { return Ok(()) };
+                    let mut uri = PWSTR::null();
+                    w.FaviconUri(&mut uri)?;
+                    if take_pwstr(uri).is_empty() {
+                        return Ok(());
+                    }
+                    let mut u = PWSTR::null();
+                    w.Source(&mut u)?;
+                    let (p, page) = (p.clone(), take_pwstr(u));
+                    w.GetFavicon(
+                        COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG,
+                        &GetFaviconCompletedHandler::create(Box::new(move |res, stream| {
+                            if let (Ok(()), Some(stream)) = (res, stream) {
+                                let _ = p.send_event(Ev::Favicon(id, page, read_stream(&stream)));
+                            }
+                            Ok(())
+                        })),
+                    )
+                })),
+                &mut token,
+            )?;
+        }
 
         // --- sound ---
         if let Ok(w8) = wv.cast::<ICoreWebView2_8>() {

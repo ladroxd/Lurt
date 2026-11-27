@@ -1,4 +1,4 @@
-// Puts the Lurt icon and version details into lurt.exe. An exe with no name, publisher or
+// Puts the Lurt icon and version details into Lurt.exe. An exe with no name, publisher or
 // version looks anonymous to Windows and to antivirus scanners.
 use std::{env, fs, path::PathBuf};
 
@@ -35,7 +35,7 @@ BEGIN
       VALUE "FileVersion", "{version}"
       VALUE "InternalName", "lurt"
       VALUE "LegalCopyright", "Copyright (c) ladroxd"
-      VALUE "OriginalFilename", "lurt.exe"
+      VALUE "OriginalFilename", "Lurt.exe"
       VALUE "ProductName", "Lurt"
       VALUE "ProductVersion", "{version}"
     END

@@ -4,7 +4,7 @@ use tao::window::Window;
 use tao::platform::windows::WindowExtWindows;
 use windows::Win32::{
     Foundation::{COLORREF, HWND},
-    Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn},
+    Graphics::Gdi::{CombineRgn, CreateRoundRectRgn, DeleteObject, RGN_DIFF, SetWindowRgn},
     UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, LWA_ALPHA, SWP_HIDEWINDOW, SWP_NOACTIVATE,
         SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow,
@@ -124,14 +124,21 @@ fn clear(window: &Window) {
 }
 
 /// Clip a page view to a rounded rectangle. `w`/`h`/`radius` are physical pixels.
-pub fn round(hwnd: HWND, w: i32, h: i32, radius: i32) {
+/// `hole` (left, top, right, bottom, radius) is cut out of the view, so the toolbar's view
+/// underneath shows through and gets the clicks there.
+pub fn round(hwnd: HWND, w: i32, h: i32, radius: i32, hole: Option<[i32; 5]>) {
     unsafe {
-        if radius <= 0 {
+        if radius <= 0 && hole.is_none() {
             SetWindowRgn(hwnd, None, true);
             return;
         }
-        let d = radius * 2;
+        let d = radius.max(0) * 2;
         let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, d, d);
+        if let Some([l, t, r, b, round]) = hole {
+            let cut = CreateRoundRectRgn(l, t, r + 1, b + 1, round * 2, round * 2);
+            CombineRgn(Some(rgn), Some(rgn), Some(cut), RGN_DIFF);
+            let _ = DeleteObject(cut.into());
+        }
         // The system owns the region after this call.
         SetWindowRgn(hwnd, Some(rgn), true);
     }

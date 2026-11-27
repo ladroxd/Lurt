@@ -52,6 +52,8 @@ pub enum Ev {
     Load(u32, bool, String),
     Source(u32, String),
     History(u32),
+    /// A page's icon as a PNG: (tab, page address, bytes).
+    Favicon(u32, String, Vec<u8>),
     /// A page started or stopped playing sound: (tab, playing).
     Audio(u32, bool),
     /// (opener tab, url): a page opened a link in a new tab.
@@ -120,6 +122,8 @@ struct App {
     closed: Vec<String>,
     fullscreen: bool,
     overlay: bool,
+    /// A rectangle of the page cut away for a toolbar popup: x, y, width, height, radius.
+    hole: Option<[f64; 5]>,
     /// When to re-present the window so the Windows 10 blur covers its new size.
     glass_fix_at: Option<Instant>,
     /// When to look up the signed-in Google account again (after Google pages load).
@@ -288,6 +292,7 @@ fn main() {
         closed: Vec::new(),
         fullscreen: false,
         overlay: false,
+        hole: None,
         glass_fix_at: None,
         account_at: Some(Instant::now() + Duration::from_secs(2)),
         accounts: Vec::new(),
@@ -567,7 +572,13 @@ impl App {
         for t in &self.tabs {
             if let Some(v) = &t.view {
                 let _ = v.set_bounds(vp);
-                glass::round(v.hwnd(), px.width, px.height, radius);
+                // The hole is given in window coordinates; the view starts at the viewport.
+                let at = vp.position.to_logical::<f64>(sf);
+                let hole = self.hole.filter(|_| !self.fullscreen).map(|[x, y, w, h, r]| {
+                    let p = |n: f64| (n * sf).round() as i32;
+                    [p(x - at.x), p(y - at.y), p(x - at.x + w), p(y - at.y + h), p(r)]
+                });
+                glass::round(v.hwnd(), px.width, px.height, radius, hole);
             }
         }
     }
@@ -1223,6 +1234,23 @@ impl App {
                     self.push_state();
                 }
             }
+            Ev::Favicon(id, page, png) => {
+                if png.is_empty() || png.len() > 128 * 1024 {
+                    return;
+                }
+                let data = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png));
+                let host = util::host_of(&page);
+                let Some(t) = self.tab_mut(id) else { return };
+                // The tab may have moved on to another site while the icon was read.
+                if util::host_of(&t.url) != host {
+                    return;
+                }
+                t.fav = data.clone();
+                if !t.private && !host.is_empty() {
+                    self.remember_icon(&host, &data);
+                }
+                self.push_state();
+            }
             Ev::Audio(id, on) => {
                 if let Some(t) = self.tab_mut(id) {
                     t.audible = on;
@@ -1455,10 +1483,10 @@ impl App {
                     let private = self.tab(id).is_some_and(|t| t.private);
                     let host = util::host_of(&u);
                     let page_host = self.tab(id).map(|t| util::host_of(&t.url)).unwrap_or_default();
-                    if !private && !page_host.is_empty() && !u.ends_with(&format!("{host}/favicon.ico")) {
+                    if !private && !page_host.is_empty() && !u.ends_with(&format!("{host}/favicon.ico")) && !self.store.has_picture(&page_host) {
                         self.remember_icon(&page_host, &u);
                     }
-                    if let Some(t) = self.tab_mut(id) {
+                    if let Some(t) = self.tab_mut(id).filter(|t| !t.fav.starts_with("data:")) {
                         t.fav = u;
                     }
                     self.push_state();
@@ -1515,6 +1543,11 @@ impl App {
             }
             "close" => self.close_tab(id),
             "activate" => self.activate(id),
+            "hole" => {
+                let r: Vec<f64> = m["r"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+                self.hole = <[f64; 5]>::try_from(r).ok();
+                self.layout_tabs();
+            }
             // Volume and/or mute for one tab.
             "sound" => {
                 if let Some(t) = self.tab_mut(id) {

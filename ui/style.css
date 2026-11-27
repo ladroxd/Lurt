@@ -348,6 +348,7 @@ kbd { font-family: inherit; font-size: 11px; line-height: 1; padding: 5px 8px; b
 .tile { width: 92px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 2px; border-radius: var(--r);
         transition: background .15s; }
 .tile:hover { background: var(--hover); }
+.tile.dragging { position: relative; z-index: 2; background: var(--hover); cursor: grabbing; }
 .tile .ic { width: 54px; height: 54px; border-radius: calc(var(--r) * 1.05); display: grid; place-items: center;
             transition: transform .25s var(--spring); }
 .tile:hover .ic { transform: translateY(-2px) scale(1.04); }
@@ -758,7 +759,9 @@ body.private #omni { box-shadow: 0 0 0 1px rgba(167, 139, 250, .35) inset; }
 #vol { display: none; }
 #vol.on { display: grid; }
 #vol-pop { position: fixed; z-index: 20; width: 320px; padding: 12px 10px 10px; display: none; }
-body.vol-open #vol-pop { display: block; animation: pop .2s var(--ease); }
+body.vol-open #vol-pop { display: block; }
+/* Solid, and without a slide-in: the page is cut to exactly this shape around it. */
+#vol-pop { background: rgb(var(--base)); backdrop-filter: none; box-shadow: none; }
 #vol-pop .head { padding: 0 6px 8px; font-size: 13.5px; }
 .vol-list { max-height: 300px; overflow-y: auto; }
 .vol-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }

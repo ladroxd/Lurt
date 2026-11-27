@@ -1,4 +1,4 @@
-# Packs target\release\lurt.exe into an MSIX package for the Microsoft Store, which signs
+# Packs target\release\Lurt.exe into an MSIX package for the Microsoft Store, which signs
 # it itself. Build first (cargo build --release), then:
 #
 #   powershell -File packaging\msix.ps1 -IdentityName <name> -Publisher <CN=...> -PublisherDisplayName <name>
@@ -14,7 +14,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$exe = Join-Path $root 'target\release\lurt.exe'
+$exe = Join-Path $root 'target\release\Lurt.exe'
 if (-not (Test-Path $exe)) { throw "No $exe. Run: cargo build --release" }
 
 $cargo = Get-Content (Join-Path $root 'Cargo.toml') -Raw

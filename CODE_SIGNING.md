@@ -6,7 +6,7 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 
 ## What gets signed
 
-Only `lurt.exe` built from this repository's source by its [release workflow](.github/workflows/release.yml) on GitHub Actions. Every signing request is approved by hand.
+Only `Lurt.exe` built from this repository's source by its [release workflow](.github/workflows/release.yml) on GitHub Actions. Every signing request is approved by hand.
 
 ## Team roles
 
